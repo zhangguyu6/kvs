@@ -2,6 +2,7 @@
 mod storage;
 mod transaction;
 mod index;
+mod error;
 #[cfg(test)]
 mod tests {
     #[test]

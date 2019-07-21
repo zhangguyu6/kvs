@@ -1,27 +1,25 @@
-use super::{BlockId, NodeId};
-use crate::transaction::{TimeStamp, TxnContext};
-use std::collections::VecDeque;
+use crate::{
+    error::TxnError,
+    index::{Branch, Leaf},
+    transaction::TimeStamp,
+};
+pub const BLOCK_SIZE: usize = 4096;
 
-enum Block {
-    SmallData,
-    Data,
-    DataIndex1,
-    DataIndex2,
-    DataIndex3,
-    Leaf,
-    Branch,
-    Meta,
-}
+pub type BlockId = u64;
 
-pub struct Tuple {
-    block_id: BlockId,
-    txn_context: TxnContext,
-    key: Vec<u8>,
-    val: Vec<u8>,
-}
+pub struct RawBlock([u8; BLOCK_SIZE]);
 
-pub struct Record {
-    node_id: NodeId,
-    txn_context: TxnContext,
-    versions: VecDeque<Tuple>,
+impl Default for RawBlock {
+    fn default() -> Self {
+        RawBlock([0;BLOCK_SIZE])
+    }
 }
+// enum Block {
+//     D(BlockRef<Tuple>),
+//     DIndex1(Vec<BlockRef<Tuple>>),
+//     DIndex2(Vec<>),
+//     L(BlockRef<Leaf>),
+//     B(BlockRef<Branch>),
+// }
+
+
