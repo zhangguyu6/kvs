@@ -1,5 +1,5 @@
 use crate::{
-    error::TxnError,
+    error::TdbError,
     storage::block_layout::{BlockId, RawBlock},
 };
 use futures::ready;
@@ -15,20 +15,20 @@ lazy_static! {
 }
 
 pub trait RawBlockDev {
-    fn read(&self, blockid: BlockId, buf: &mut RawBlock) -> Result<(), TxnError>;
+    fn read(&self, blockid: BlockId, buf: &mut RawBlock) -> Result<(), TdbError>;
     fn poll_read(
         &self,
         cx: &mut Context,
         blockid: BlockId,
         buf: &mut RawBlock,
-    ) -> Poll<Result<(), TxnError>>;
-    fn write(&self, blockid: BlockId, buf: &RawBlock) -> Result<(), TxnError>;
+    ) -> Poll<Result<(), TdbError>>;
+    fn write(&self, blockid: BlockId, buf: &RawBlock) -> Result<(), TdbError>;
     fn async_write(
         &self,
         cx: &mut Context,
         blockid: BlockId,
         buf: &RawBlock,
-    ) -> Poll<Result<(), TxnError>>;
+    ) -> Poll<Result<(), TdbError>>;
 }
 
 pub struct BlockReader<'a, R: ?Sized + Unpin> {
@@ -40,7 +40,7 @@ pub struct BlockReader<'a, R: ?Sized + Unpin> {
 impl<R: ?Sized + Unpin> Unpin for BlockReader<'_, R> {}
 
 impl<R: RawBlockDev + ?Sized + Unpin> Future for BlockReader<'_, R> {
-    type Output = Result<(), TxnError>;
+    type Output = Result<(), TdbError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
@@ -58,7 +58,7 @@ pub struct BlockWriter<'a, W: ?Sized + Unpin> {
 impl<R: ?Sized + Unpin> Unpin for BlockWriter<'_, R> {}
 
 impl<R: RawBlockDev + ?Sized + Unpin> Future for BlockWriter<'_, R> {
-    type Output = Result<(), TxnError>;
+    type Output = Result<(), TdbError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
@@ -76,7 +76,7 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
     pub fn new(dev: Dev) -> Self {
         Self { dev: dev }
     }
-    pub fn sync_read(&self, block_id: BlockId, buf: &mut RawBlock) -> Result<(), TxnError> {
+    pub fn sync_read(&self, block_id: BlockId, buf: &mut RawBlock) -> Result<(), TdbError> {
         self.dev.read(block_id, buf)
     }
     pub fn async_read<'a>(
@@ -90,7 +90,7 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
             buf: buf,
         }
     }
-    pub fn sync_write(&self, block_id: BlockId, buf: &RawBlock) -> Result<(), TxnError> {
+    pub fn sync_write(&self, block_id: BlockId, buf: &RawBlock) -> Result<(), TdbError> {
         self.dev.write(block_id, buf)
     }
     pub fn async_write<'a>(&'a self, block_id: BlockId, buf: &'a RawBlock) -> BlockWriter<'a, Dev> {
@@ -111,7 +111,7 @@ impl Default for FileBlockDev {
 }
 
 impl RawBlockDev for FileBlockDev {
-    fn read(&self, blockid: BlockId, buf: &mut RawBlock) -> Result<(), TxnError> {
+    fn read(&self, blockid: BlockId, buf: &mut RawBlock) -> Result<(), TdbError> {
         unimplemented!()
     }
     fn poll_read(
@@ -119,10 +119,10 @@ impl RawBlockDev for FileBlockDev {
         cx: &mut Context,
         blockid: BlockId,
         buf: &mut RawBlock,
-    ) -> Poll<Result<(), TxnError>> {
+    ) -> Poll<Result<(), TdbError>> {
         unimplemented!()
     }
-    fn write(&self, blockid: BlockId, buf: &RawBlock) -> Result<(), TxnError> {
+    fn write(&self, blockid: BlockId, buf: &RawBlock) -> Result<(), TdbError> {
         unimplemented!()
     }
     fn async_write(
@@ -130,7 +130,7 @@ impl RawBlockDev for FileBlockDev {
         cx: &mut Context,
         blockid: BlockId,
         buf: &RawBlock,
-    ) -> Poll<Result<(), TxnError>> {
+    ) -> Poll<Result<(), TdbError>> {
         unimplemented!()
     }
 }

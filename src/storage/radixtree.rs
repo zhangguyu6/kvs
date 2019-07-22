@@ -1,4 +1,3 @@
-use crate::storage::block_table::{AsBlock, BlockRef};
 use std::any::Any;
 use std::mem::{self, MaybeUninit};
 use std::ptr;
@@ -14,12 +13,22 @@ fn get_index2(node_id: u64) -> usize {
     (node_id >> FAN_FACTOR % FAN_OUT) as usize
 }
 
-struct RadixTree {
-    inner: Node1,
+// Node1预分配，Node2运行时分配，但不回收 , block由lru background thread回收
+pub struct RadixTree<T> {
+    inner: Node1<T>,
 }
 
-impl RadixTree {
-    pub fn get(&self, node_id: u64) -> Option<*mut Box<dyn Any>> {
+impl<T> Default for RadixTree<T> {
+    fn default() -> Self {
+        Self {
+            inner: Node1::default(),
+        }
+    }
+}
+
+impl<T: Send + 'static> RadixTree<T> {
+    
+    pub fn get(&self, node_id: u64) -> Option<*mut T> {
         let index1 = get_index1(node_id);
         let node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
         if node2_ptr.is_null() {
@@ -32,43 +41,43 @@ impl RadixTree {
         }
         Some(block_ptr)
     }
-    pub fn store(&self, node_id: u64, val: *mut Box<dyn Any>) -> *mut Box<dyn Any> {
+
+    pub fn get_or_touch(&self, node_id: u64) -> *mut T {
         let index1 = get_index1(node_id);
         let mut node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
         if node2_ptr.is_null() {
-            node2_ptr = Box::into_raw(Box::from(Node2::default()));
-            self.inner.children[index1].store(node2_ptr, Ordering::SeqCst);
+            let new_node2_ptr = Box::into_raw(Box::from(Node2::default()));
+            let old_node2_ptr = self.inner.children[index1].compare_and_swap(
+                node2_ptr,
+                new_node2_ptr,
+                Ordering::SeqCst,
+            );
+            if old_node2_ptr != node2_ptr {
+                node2_ptr = old_node2_ptr;
+            } else {
+                node2_ptr = new_node2_ptr;
+            }
         }
         let index2 = get_index2(node_id);
-        let block_ptr = unsafe { &(*node2_ptr).children[index2] }.load(Ordering::SeqCst);
-        unsafe { &(*node2_ptr).children[index2] }.store(val, Ordering::SeqCst);
-        block_ptr
+        unsafe { &(*node2_ptr).children[index2] }.load(Ordering::SeqCst)
     }
-    pub fn del(&self, node_id: u64) -> Option<*mut Box<dyn Any>> {
+
+    pub fn cas(&self, node_id: u64, old: *mut T, new: *mut T) -> *mut T {
         let index1 = get_index1(node_id);
         let node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
-        if node2_ptr.is_null() {
-            return None;
-        }
+        assert!(!node2_ptr.is_null());
         let index2 = get_index2(node_id);
-        let block_ptr = unsafe { &(*node2_ptr).children[index2] }.load(Ordering::SeqCst);
-        if block_ptr.is_null() {
-            return None;
-        }
-        unsafe { &(*node2_ptr).children[index2] }.store(ptr::null_mut(),Ordering::SeqCst);
-        self.inner.children[index1].store(ptr::null_mut(),Ordering::SeqCst);
-        Box::from(node2_ptr);
-        Some(block_ptr)
+        unsafe { &(*node2_ptr).children[index2] }.compare_and_swap(old, new, Ordering::SeqCst)
     }
 }
 
-struct Node1 {
-    children: [AtomicPtr<Node2>; FAN_OUT as usize],
+struct Node1<T> {
+    children: [AtomicPtr<Node2<T>>; FAN_OUT as usize],
 }
 
-impl Default for Node1 {
+impl<T> Default for Node1<T> {
     fn default() -> Self {
-        let mut children: [AtomicPtr<Node2>; FAN_OUT as usize] =
+        let mut children: [AtomicPtr<Node2<T>>; FAN_OUT as usize] =
             unsafe { MaybeUninit::uninit().assume_init() };
         for index in 0..children.len() {
             children[index] = AtomicPtr::new(ptr::null_mut());
@@ -77,13 +86,13 @@ impl Default for Node1 {
     }
 }
 
-struct Node2 {
-    children: [AtomicPtr<Box<dyn Any>>; FAN_OUT as usize],
+struct Node2<T> {
+    children: [AtomicPtr<T>; FAN_OUT as usize],
 }
 
-impl Default for Node2 {
+impl<T> Default for Node2<T> {
     fn default() -> Self {
-        let mut children: [AtomicPtr<Box<dyn Any>>; FAN_OUT as usize] =
+        let mut children: [AtomicPtr<T>; FAN_OUT as usize] =
             unsafe { MaybeUninit::uninit().assume_init() };
         for index in 0..children.len() {
             children[index] = AtomicPtr::new(ptr::null_mut());
