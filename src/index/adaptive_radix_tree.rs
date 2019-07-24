@@ -1,117 +1,10 @@
 use crate::error::TdbError::{self, *};
+use crate::transaction::{TimeStamp, LOCAL_TS};
 use std::mem::{self, MaybeUninit};
 use std::ops::Range;
 use std::result;
 use std::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
 use std::thread::yield_now;
-
-const SPLIN_COUNT: usize = 60;
-const MAX_PREFIXLEN: usize = 8;
-
-struct OptimisticLock(AtomicU64);
-
-type Result<T> = result::Result<T, TdbError>;
-
-impl OptimisticLock {
-    #[inline]
-    fn read_lock(&self) -> Result<u64> {
-        let version = self.wait_unlock();
-        if version & 1 == 1 {
-            Err(Restart)
-        } else {
-            Ok(version)
-        }
-    }
-
-    #[inline]
-    fn check_lock(&self, version: u64) -> Result<()> {
-        self.read_unlock(version)
-    }
-
-    #[inline]
-    fn read_unlock(&self, version: u64) -> Result<()> {
-        if version == self.0.load(Ordering::SeqCst) {
-            Ok(())
-        } else {
-            Err(Restart)
-        }
-    }
-
-    #[inline]
-    fn read_unlock_other(&self, version: u64, other: &Self) -> Result<()> {
-        if version != self.0.load(Ordering::SeqCst) {
-            self.write_unlock();
-            Err(Restart)
-        } else {
-            Ok(())
-        }
-    }
-
-    #[inline]
-    fn update_to_write(&self, version: u64) -> Result<()> {
-        if self
-            .0
-            .compare_and_swap(version, version + 2, Ordering::SeqCst)
-            == version
-        {
-            Ok(())
-        } else {
-            Err(Restart)
-        }
-    }
-
-    #[inline]
-    fn update_to_write_other(&self, version: u64, other: &Self) -> Result<()> {
-        if self
-            .0
-            .compare_and_swap(version, version + 2, Ordering::SeqCst)
-            == version
-        {
-            Ok(())
-        } else {
-            self.write_unlock();
-            Err(Restart)
-        }
-    }
-
-    #[inline]
-    fn write_lock(&self) -> Result<()> {
-        loop {
-            let version = self.read_lock()?;
-            if self.update_to_write(version).is_ok() {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    #[inline]
-    fn write_unlock(&self) {
-        self.0.fetch_add(2, Ordering::SeqCst);
-    }
-
-    #[inline]
-    fn write_unlock_obsolete(&self) {
-        self.0.fetch_add(3, Ordering::SeqCst);
-    }
-
-    #[inline]
-    fn wait_unlock(&self) -> u64 {
-        let mut version = self.0.load(Ordering::SeqCst);
-        let mut count = 0;
-        while version & 2 == 2 {
-            if count >= SPLIN_COUNT {
-                yield_now();
-                count = 0;
-            }
-            count += 1;
-            version = self.0.load(Ordering::SeqCst);
-        }
-        version
-    }
-}
-
-// enum Node<K,V> {}
 
 enum Node<K, V> {
     N4(Node4<K, V>),
@@ -123,19 +16,30 @@ enum Node<K, V> {
 
 struct NodeBase {
     children_num: u8,
-    lock: OptimisticLock,
-    prefix_len: u8,
-    prefix: [u8; MAX_PREFIXLEN],
+    ts: TimeStamp,
+    prefix: Vec<u8>,
 }
 
 impl Default for NodeBase {
     fn default() -> Self {
         Self {
             children_num: 0,
-            lock: OptimisticLock(AtomicU64::new(0)),
-            prefix_len: 0,
-            prefix: [0; MAX_PREFIXLEN],
+            ts: LOCAL_TS.with(|ts| *ts.borrow()),
+            prefix: Vec::new(),
         }
+    }
+}
+
+impl NodeBase {
+    // return len of string eq
+    #[inline]
+    fn prefix_match_len<K: AsRef<[u8]>>(&self, key: K, depth: usize) -> usize {
+        for i in 0..self.prefix.len() {
+            if key.as_ref()[i + depth] != self.prefix[i] {
+                return i;
+            }
+        }
+        self.prefix.len()
     }
 }
 
@@ -156,6 +60,17 @@ impl<K, V> Default for Node4<K, V> {
             base: NodeBase::default(),
             keys: [0; 4],
             children: children,
+        }
+    }
+}
+
+impl<K, V> Drop for Node4<K, V> {
+    fn drop(&mut self) {
+        for aptr in self.children.iter() {
+            let node_ptr = aptr.load(Ordering::Relaxed);
+            if !node_ptr.is_null() {
+                unsafe { Box::from_raw(node_ptr) };
+            }
         }
     }
 }
@@ -181,6 +96,17 @@ impl<K, V> Default for Node16<K, V> {
     }
 }
 
+impl<K, V> Drop for Node16<K, V> {
+    fn drop(&mut self) {
+        for aptr in self.children.iter() {
+            let node_ptr = aptr.load(Ordering::Relaxed);
+            if !node_ptr.is_null() {
+                unsafe { Box::from_raw(node_ptr) };
+            }
+        }
+    }
+}
+
 struct Node48<K, V> {
     base: NodeBase,
     keys: [u8; 48],
@@ -198,6 +124,17 @@ impl<K, V> Default for Node48<K, V> {
             base: NodeBase::default(),
             keys: [0; 48],
             children: children,
+        }
+    }
+}
+
+impl<K, V> Drop for Node48<K, V> {
+    fn drop(&mut self) {
+        for aptr in self.children.iter() {
+            let node_ptr = aptr.load(Ordering::Relaxed);
+            if !node_ptr.is_null() {
+                unsafe { Box::from_raw(node_ptr) };
+            }
         }
     }
 }
@@ -221,6 +158,17 @@ impl<K, V> Default for Node256<K, V> {
     }
 }
 
+impl<K, V> Drop for Node256<K, V> {
+    fn drop(&mut self) {
+        for aptr in self.children.iter() {
+            let node_ptr = aptr.load(Ordering::Relaxed);
+            if !node_ptr.is_null() {
+                unsafe { Box::from_raw(node_ptr) };
+            }
+        }
+    }
+}
+
 pub struct Art<K, V> {
     root: AtomicPtr<Node<K, V>>,
 }
@@ -233,17 +181,33 @@ impl<K, V> Default for Art<K, V> {
     }
 }
 
+impl<K, V> Drop for Art<K, V> {
+    fn drop(&mut self) {
+        let node_ptr = self.root.load(Ordering::Relaxed);
+        if !node_ptr.is_null() {
+            unsafe { Box::from_raw(node_ptr) };
+        }
+    }
+}
+
 impl<K: AsRef<[u8]>, V: Clone> Art<K, V> {
     pub fn get(&self, key: K) -> Option<V> {
         unimplemented!()
     }
+
+    // copy path
     pub fn insert(&self, key: K, val: V) -> Option<V> {
         unimplemented!()
     }
+
+    // copy path
     pub fn remove(&self, key: K) -> Option<V> {
         unimplemented!()
     }
+
     pub fn range<Iter: Iterator>(&self, range: Range<K>) -> Iter {
         unimplemented!()
     }
 }
+
+impl<K: AsRef<u8>, V: Clone> Node<K, V> {}
