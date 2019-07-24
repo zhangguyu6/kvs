@@ -1,14 +1,14 @@
 use std::error::Error;
-use std::io;
 use std::fmt;
-
+use std::io;
 
 #[derive(Debug)]
 pub enum TdbError {
     IoError(io::Error),
-    SerializeError
+    SerializeError,
+    DeserializeError,
+    Restart,
 }
-
 
 impl fmt::Display for TdbError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -25,7 +25,7 @@ impl Error for TdbError {
         use TdbError::*;
         match self {
             IoError(ioerror) => Some(ioerror),
-            _ => None
+            _ => None,
         }
     }
 }
