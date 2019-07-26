@@ -66,7 +66,7 @@ impl Default for NodeBase {
 impl NodeBase {
     // return len of string eq
     #[inline]
-    fn prefix_match_len<K: AsRef<[u8]>>(&self, key: K, depth: usize) -> usize {
+    fn prefix_match_len<K: AsRef<[u8]>>(&self, key: &K, depth: usize) -> usize {
         for i in 0..self.prefix.len() {
             if key.as_ref()[i + depth] != self.prefix[i] {
                 return i;
@@ -301,8 +301,43 @@ impl<K, V> Destory for Art<K, V> {
 }
 
 impl<K: AsRef<[u8]>, V: Clone> Art<K, V> {
-    pub fn get(&self, key: K) -> Option<V> {
-        unimplemented!()
+    pub fn get(&self, key: &K) -> Option<V> {
+        let key_bytes = key.as_ref();
+        let mut prefix_len = 0;
+        let mut depth = 0;
+        let node_ptr = self.root.load(Ordering::SeqCst);
+        if node_ptr.is_null() {
+            return None;
+        }
+        let mut node_ref = unsafe { &*node_ptr };
+        loop {
+            match node_ref {
+                Node::L(_key, _val) => {
+                    if _key.as_ref() == key.as_ref() {
+                        return Some(_val.clone());
+                    } else {
+                        break;
+                    }
+                }
+                Node::B(branch) => {
+                    let base = branch.get_base();
+                    let prefix_len = base.prefix_match_len(key, depth);
+                    if prefix_len != base.prefix.len() {
+                        return None;
+                    } else {
+                        depth += prefix_len;
+                    }
+                    assert!(depth < key.as_ref().len(), "don't support prefix eq key");
+                    if let Some(_node_ref) = branch.find_child(key.as_ref()[depth]) {
+                        node_ref = _node_ref;
+                        depth += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        None
     }
 
     // copy path
@@ -321,50 +356,25 @@ impl<K: AsRef<[u8]>, V: Clone> Art<K, V> {
 }
 
 impl<K, V> Branch<K, V> {
-    fn find_child(&self, byte: u8) -> Option<&Node<K, V>> {
+    fn get_base(&self) -> &NodeBase {
         use Branch::*;
         match self {
-            N4(node) => {
-                for i in 0..node.children_nums {
-                    if node.keys[i] == byte {
-                        let ptr = node.children[i].load(Ordering::SeqCst);
-                        assert!(!ptr.is_null());
-                        let ptr_ref = unsafe { &*ptr };
-                        return Some(ptr_ref);
-                    }
-                }
-            }
-            N16(node) => {
-                for i in 0..node.children_nums {
-                    if node.keys[i] == byte {
-                        let ptr = node.children[i].load(Ordering::SeqCst);
-                        assert!(!ptr.is_null());
-                        let ptr_ref = unsafe { &*ptr };
-                        return Some(ptr_ref);
-                    }
-                }
-            }
-            N48(node) => {
-                let index = node.keys[byte as usize];
-                if index != DEL {
-                    let ptr = node.children[index as usize].load(Ordering::SeqCst);
-                    assert!(!ptr.is_null());
-                    let ptr_ref = unsafe { &*ptr };
-                    return Some(ptr_ref);
-                }
-            }
-            N256(node) => {
-                let ptr = node.children[byte as usize].load(Ordering::SeqCst);
-                if !ptr.is_null() {
-                    let ptr_ref = unsafe { &*ptr };
-                    return Some(ptr_ref);
-                }
+            N4(node) => &node.base,
+            N16(node) => &node.base,
+            N48(node) => &node.base,
+            N256(node) => &node.base,
+        }
+    }
+    fn find_child(&self, byte: u8) -> Option<&Node<K, V>> {
+        if let Some(atomic_ptr) = self.find_child_ptr(byte) {
+            let ptr = atomic_ptr.load(Ordering::SeqCst);
+            if !ptr.is_null() {
+                return Some(unsafe { &*ptr });
             }
         }
         None
     }
-    // old ptr (if old ptr is clean), current ref ,
-    fn find_child_ptr(&mut self, byte: u8) -> Option<&AtomicPtr<Node<K, V>>> {
+    fn find_child_ptr(&self, byte: u8) -> Option<&AtomicPtr<Node<K, V>>> {
         use Branch::*;
         match self {
             N4(node) => {
@@ -393,21 +403,10 @@ impl<K, V> Branch<K, V> {
         }
         None
     }
-    //     fn find_children_mut(&mut self, byte: u8) -> Option<(*mut Node<K,V>,&mut Node<K, V>)> {
-    //         let current_ts =LOCAL_TS.with(|ts| *ts.borrow());
-    //         for i in 0..self.children_nums {
-    //             if self.keys[i] == byte {
-    //                 let ptr = self.children[i].load(Ordering::SeqCst);
-    //                 assert!(!ptr.is_null());
-    //                 let ptr_ref = unsafe { ptr.as_ref() }.unwrap();
-    //                 if ptr_ref.base.ts == current_ts {
-    //                     return Some(unsafe { &mut *ptr });
-    //                 }
-    //             }
-    //         }
-    //         None
-    //     }
-    // }
+    fn is_dirty(&self) -> bool {
+        let current_ts = LOCAL_TS.with(|ts| *ts.borrow());
+        current_ts == self.get_base().ts
+    }
 }
 
 impl<K, V> Node<K, V> {
