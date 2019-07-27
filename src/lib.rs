@@ -1,4 +1,5 @@
 #![feature(core_intrinsics)]
+#![feature(arbitrary_self_types)]
 mod storage;
 mod transaction;
 mod index;
