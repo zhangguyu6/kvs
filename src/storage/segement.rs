@@ -1,4 +1,4 @@
-use super::bitmap::BitMap;
+use crate::utils::BitMap;
 use crate::transaction::TimeStamp;
 
 struct Segement<BMap: BitMap> {

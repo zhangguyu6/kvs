@@ -1,15 +1,17 @@
-use std::any::Any;
-use std::mem::{self, MaybeUninit};
+use std::mem::MaybeUninit;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
-const FAN_FACTOR: u64 = 18;
-const FAN_OUT: u64 = 1 << FAN_FACTOR;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-fn get_index1(node_id: u64) -> usize {
+const FAN_FACTOR: u32 = 16;
+
+const FAN_OUT: u32 = 1 << FAN_FACTOR;
+
+fn get_index1(node_id: u32) -> usize {
     (node_id % FAN_OUT) as usize
 }
 
-fn get_index2(node_id: u64) -> usize {
+fn get_index2(node_id: u32) -> usize {
     (node_id >> FAN_FACTOR % FAN_OUT) as usize
 }
 
@@ -18,7 +20,7 @@ pub struct RadixTree<T> {
     inner: Node1<T>,
 }
 
-impl<T> Default for RadixTree<T> {
+impl<T: Default> Default for RadixTree<T> {
     fn default() -> Self {
         Self {
             inner: Node1::default(),
@@ -26,23 +28,28 @@ impl<T> Default for RadixTree<T> {
     }
 }
 
-impl<T: Send + 'static> RadixTree<T> {
-    
-    pub fn get(&self, node_id: u64) -> Option<*mut T> {
+impl<T: Default> RadixTree<T> {
+    pub fn get_readlock(&self, node_id: u32) -> Option<RwLockReadGuard<'_, T>> {
         let index1 = get_index1(node_id);
         let node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
         if node2_ptr.is_null() {
             return None;
         }
         let index2 = get_index2(node_id);
-        let block_ptr = unsafe { &(*node2_ptr).children[index2] }.load(Ordering::SeqCst);
-        if block_ptr.is_null() {
+        let node2_ref = unsafe { node2_ptr.as_ref() }.unwrap();
+        Some(node2_ref.children[index2].read())
+    }
+    pub fn get_writelock(&self, node_id: u32) -> Option<RwLockWriteGuard<'_, T>> {
+        let index1 = get_index1(node_id);
+        let node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
+        if node2_ptr.is_null() {
             return None;
         }
-        Some(block_ptr)
+        let index2 = get_index2(node_id);
+        let node2_ref = unsafe { node2_ptr.as_ref() }.unwrap();
+        Some(node2_ref.children[index2].write())
     }
-
-    pub fn get_or_touch(&self, node_id: u64) -> *mut T {
+    pub fn get_or_touchwritelock(&self, node_id: u32) -> Option<RwLockWriteGuard<'_, T>> {
         let index1 = get_index1(node_id);
         let mut node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
         if node2_ptr.is_null() {
@@ -59,15 +66,8 @@ impl<T: Send + 'static> RadixTree<T> {
             }
         }
         let index2 = get_index2(node_id);
-        unsafe { &(*node2_ptr).children[index2] }.load(Ordering::SeqCst)
-    }
-
-    pub fn cas(&self, node_id: u64, old: *mut T, new: *mut T) -> *mut T {
-        let index1 = get_index1(node_id);
-        let node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
-        assert!(!node2_ptr.is_null());
-        let index2 = get_index2(node_id);
-        unsafe { &(*node2_ptr).children[index2] }.compare_and_swap(old, new, Ordering::SeqCst)
+        let node2_ref = unsafe { node2_ptr.as_ref() }.unwrap();
+        Some(node2_ref.children[index2].write())
     }
 }
 
@@ -75,7 +75,7 @@ struct Node1<T> {
     children: [AtomicPtr<Node2<T>>; FAN_OUT as usize],
 }
 
-impl<T> Default for Node1<T> {
+impl<T: Default> Default for Node1<T> {
     fn default() -> Self {
         let mut children: [AtomicPtr<Node2<T>>; FAN_OUT as usize] =
             unsafe { MaybeUninit::uninit().assume_init() };
@@ -87,15 +87,15 @@ impl<T> Default for Node1<T> {
 }
 
 struct Node2<T> {
-    children: [AtomicPtr<T>; FAN_OUT as usize],
+    children: [RwLock<T>; FAN_OUT as usize],
 }
 
-impl<T> Default for Node2<T> {
+impl<T: Default> Default for Node2<T> {
     fn default() -> Self {
-        let mut children: [AtomicPtr<T>; FAN_OUT as usize] =
+        let mut children: [RwLock<T>; FAN_OUT as usize] =
             unsafe { MaybeUninit::uninit().assume_init() };
         for index in 0..children.len() {
-            children[index] = AtomicPtr::new(ptr::null_mut());
+            children[index] = RwLock::default()
         }
         Self { children }
     }

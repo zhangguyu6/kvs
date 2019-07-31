@@ -1,6 +1,6 @@
-struct LocalBitMap {
+pub struct LocalBitMap {
     inner: Vec<u64>,
-    free_num: usize,
+    free_bits: usize,
 }
 
 impl LocalBitMap {
@@ -12,11 +12,11 @@ impl LocalBitMap {
         }
         Self {
             inner: inner,
-            free_num: size,
+            free_bits: size,
         }
     }
     #[inline]
-    fn find_bit(&self, bits: u64, set: bool) -> Option<usize> {
+    fn find_bit(bits: u64, set: bool) -> Option<usize> {
         if set {
             let tailing_zero_bits = bits.trailing_zeros();
             if tailing_zero_bits != 64 {
@@ -48,7 +48,7 @@ pub trait BitMap {
 impl BitMap for LocalBitMap {
     #[inline]
     fn is_full(&self) -> bool {
-        self.free_num == 0
+        self.free_bits == 0
     }
 
     #[inline]
@@ -60,13 +60,13 @@ impl BitMap for LocalBitMap {
     fn first_one_with_hint(&self, hint: usize) -> Option<usize> {
         let start_index = hint / 64;
         for index in start_index..self.inner.len() {
-            match self.find_bit(self.inner[index], true) {
+            match LocalBitMap::find_bit(self.inner[index], true) {
                 Some(offset) => return Some(index * 64 + offset),
                 _ => {}
             }
         }
         for index in 0..start_index {
-            match self.find_bit(self.inner[index], true) {
+            match LocalBitMap::find_bit(self.inner[index], true) {
                 Some(offset) => return Some(index * 64 + offset),
                 _ => {}
             }
@@ -83,13 +83,13 @@ impl BitMap for LocalBitMap {
     fn first_zero_with_hint(&self, hint: usize) -> Option<usize> {
         let start_index = hint / 64;
         for index in start_index..self.inner.len() {
-            match self.find_bit(self.inner[index], false) {
+            match LocalBitMap::find_bit(self.inner[index], false) {
                 Some(offset) => return Some(index * 64 + offset),
                 _ => {}
             }
         }
         for index in 0..start_index {
-            match self.find_bit(self.inner[index], false) {
+            match LocalBitMap::find_bit(self.inner[index], false) {
                 Some(offset) => return Some(index * 64 + offset),
                 _ => {}
             }
@@ -122,10 +122,10 @@ impl BitMap for LocalBitMap {
         }
         if set {
             self.inner[_index] |= bit_flag;
-            self.free_num -= 1;
+            self.free_bits -= 1;
         } else {
             self.inner[_index] &= bit_flag;
-            self.free_num += 1;
+            self.free_bits += 1;
         }
     }
 }
