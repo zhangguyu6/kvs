@@ -49,7 +49,7 @@ impl<T: Default> RadixTree<T> {
         let node2_ref = unsafe { node2_ptr.as_ref() }.unwrap();
         Some(node2_ref.children[index2].write())
     }
-    pub fn get_or_touchwritelock(&self, node_id: u32) -> Option<RwLockWriteGuard<'_, T>> {
+    pub fn get_or_touchwritelock(&self, node_id: u32) -> RwLockWriteGuard<'_, T> {
         let index1 = get_index1(node_id);
         let mut node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
         if node2_ptr.is_null() {
@@ -67,7 +67,7 @@ impl<T: Default> RadixTree<T> {
         }
         let index2 = get_index2(node_id);
         let node2_ref = unsafe { node2_ptr.as_ref() }.unwrap();
-        Some(node2_ref.children[index2].write())
+        node2_ref.children[index2].write()
     }
 }
 

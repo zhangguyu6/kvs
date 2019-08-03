@@ -1,5 +1,6 @@
 mod node_address_table;
 mod noderef;
+use crate::storage::BlockId;
+use noderef::NodeRef;
 
-#[derive(Copy, Clone)]
-pub struct NodeId(u32);
+pub type NodeId = u32;

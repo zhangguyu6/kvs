@@ -2,50 +2,38 @@ use crate::{
     error::TdbError,
     index::{Branch, Leaf},
     transaction::TimeStamp,
+    tree::NodeKind,
 };
+use std::io::{Read, Write};
 
 pub const BLOCK_SIZE: usize = 4096;
 
-pub type BlockId = u64;
+pub type BlockId = u32;
 
-pub struct RawBlock([u8; BLOCK_SIZE]);
+// if page size is 4096, BlockOff must be aligned to 4096 / (1<<6) = 64 byte, 2 bit for node kind
+#[derive(Copy, Debug, Clone)]
+pub struct BlockOffKind(u8);
 
-impl Default for RawBlock {
-    fn default() -> Self {
-        RawBlock([0; BLOCK_SIZE])
+impl BlockOffKind {
+    pub fn new(byte:u8) -> Self {
+        Self(byte)
     }
-}
-
-pub enum Block {
-    D(Tuple),
-}
-
-impl Block {
-    pub fn as_ref<B: AsBlock>(&self) -> &B {
-        B::get_ref(self)
+    #[inline]
+    pub fn get_offset(&self) -> usize {
+        (self.0 >> 2) as usize
     }
-}
-
-#[derive(Clone)]
-pub struct Tuple {
-    key: Vec<u8>,
-    val: Vec<u8>,
-}
-
-#[repr(u8)]
-pub enum BlockKind {
-    T,
+    #[inline]
+    pub fn get_kind(&self) -> NodeKind {
+        NodeKind::from(self.0)
+    }
 }
 
 pub trait BlockSerialize {
-    fn serialize(&self) -> Result<RawBlock, TdbError>;
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError>;
 }
 
 pub trait BlockDeserialize: Sized {
-    fn deserialize(raw_block: RawBlock) -> Result<Self, TdbError>;
+    fn deserialize<R: Read>(reader: &R) -> Result<Self, TdbError>;
 }
 
-pub trait AsBlock: BlockSerialize + BlockDeserialize + Into<Block> {
-    fn get_ref(block: &Block) -> &Self;
-    // fn get_kind(&self) -> BlockKind;
-}
+pub trait AsBlock: BlockSerialize + BlockDeserialize {}

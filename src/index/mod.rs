@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod adaptive_radix_tree;
 
 use std::ops::Range;

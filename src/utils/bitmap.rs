@@ -1,8 +1,4 @@
 use std::u32;
-pub struct LocalBitMap {
-    inner: Vec<u64>,
-    free_bits: usize,
-}
 
 pub trait AsBitBlock: Copy {
     fn bits() -> usize;
@@ -51,7 +47,7 @@ impl AsBitBlock for u32 {
             let target = self >> start;
             let tail_zeros = target.trailing_zeros();
             let one_index = tail_zeros as usize + start;
-            if one_index == Self::bits() {
+            if one_index >= Self::bits() {
                 None
             } else {
                 Some(one_index)
@@ -60,7 +56,7 @@ impl AsBitBlock for u32 {
             let target = self >> start;
             let tail_ones = (!target).trailing_zeros();
             let zero_index = tail_ones as usize + start;
-            if zero_index == Self::bits() {
+            if zero_index >= Self::bits() {
                 None
             } else {
                 Some(zero_index)
@@ -75,27 +71,27 @@ impl AsBitBlock for u32 {
     }
 }
 
-struct BitVec<B> {
+pub struct BitMap<B> {
     bit_blocks: Vec<B>,
     zero_bits: usize,
     all_bits: usize,
 }
 
-impl<B: AsBitBlock> BitVec<B> {
-    fn with_capacity(cap: usize) -> Self {
+impl<B: AsBitBlock> BitMap<B> {
+    pub fn with_capacity(cap: usize) -> Self {
         assert!(cap % B::bits() == 0);
         let mut bit_blocks = Vec::with_capacity(cap / B::bits());
-        for _ in 0..bit_blocks.len() {
+        for _ in 0..bit_blocks.capacity() {
             bit_blocks.push(B::all_zero())
         }
-        Self {
+        BitMap {
             bit_blocks: bit_blocks,
             zero_bits: cap,
             all_bits: cap,
         }
     }
     #[inline]
-    fn get_bit(&self, index: usize) -> bool {
+    pub fn get_bit(&self, index: usize) -> bool {
         if index >= self.all_bits {
             panic!("overflow max bit bound")
         }
@@ -106,33 +102,38 @@ impl<B: AsBitBlock> BitVec<B> {
     }
 
     #[inline]
-    fn set_bit(&self, index: usize, bit: bool) {
+    pub fn set_bit(&mut self, index: usize, bit: bool) {
         if index >= self.all_bits {
             panic!("overflow max bit bound")
         }
         let big_index = index / B::bits();
         let small_index = index % B::bits();
-        let mut bit_block = self.bit_blocks[big_index];
+        let bit_block = &mut self.bit_blocks[big_index];
         bit_block.set_bit(small_index, bit);
     }
 
     #[inline]
     fn count_ones(&self) -> usize {
-        self.all_bits - self.zero_bits
+        let mut ones = 0;
+        for i in self.bit_blocks.iter() {
+            ones += i.ones()
+        }
+        ones
     }
 
     #[inline]
     fn count_zeros(&self) -> usize {
-        self.zero_bits
+        let mut zeros = 0;
+        for i in self.bit_blocks.iter() {
+            zeros += i.zeros()
+        }
+        zeros
     }
 
     #[inline]
-    fn first_zero_with_hint(&self, hint: usize) -> Option<usize> {
+    pub fn first_zero_with_hint(&self, hint: usize) -> Option<usize> {
         if hint >= self.all_bits {
             panic!("overflow max bit bound")
-        }
-        if self.count_zeros() == 0 {
-            return None;
         }
         let start_index = hint / B::bits();
         let small_index = hint % B::bits();
@@ -160,16 +161,22 @@ impl<B: AsBitBlock> BitVec<B> {
         None
     }
     #[inline]
-    fn first_zero(&self) -> Option<usize> {
-        self.first_one_with_hint(0)
+    pub fn first_zero_with_hint_set(&mut self, hint: usize) -> Option<usize> {
+        if let Some(index) = self.first_zero_with_hint(hint) {
+            self.set_bit(index, true);
+            Some(index)
+        } else {
+            None
+        }
     }
     #[inline]
-    fn first_one_with_hint(&self, hint: usize) -> Option<usize> {
+    pub fn first_zero(&self) -> Option<usize> {
+        self.first_zero_with_hint(0)
+    }
+    #[inline]
+    pub fn first_one_with_hint(&self, hint: usize) -> Option<usize> {
         if hint >= self.all_bits {
             panic!("overflow max bit bound")
-        }
-        if self.count_ones() == 0 {
-            return None;
         }
         let start_index = hint / B::bits();
         let small_index = hint % B::bits();
@@ -178,7 +185,7 @@ impl<B: AsBitBlock> BitVec<B> {
             return Some(index + start_index * B::bits());
         }
 
-        for index in start_index..self.bit_blocks.len() {
+        for index in start_index + 1..self.bit_blocks.len() {
             let bit_block = self.bit_blocks[index];
             if bit_block.ones() != 0 {
                 if let Some(_index) = bit_block.get_first(0, true) {
@@ -197,134 +204,17 @@ impl<B: AsBitBlock> BitVec<B> {
         None
     }
     #[inline]
-    fn first_one(&self) -> Option<usize> {
-        self.first_one_with_hint(0)
-    }
-}
-
-impl LocalBitMap {
-    pub fn new(size: usize) -> Self {
-        assert!(size % 64 == 0);
-        let mut inner = Vec::with_capacity(size / 64);
-        for _ in 0..size / 64 {
-            inner.push(0);
-        }
-        Self {
-            inner: inner,
-            free_bits: size,
-        }
-    }
-    #[inline]
-    fn find_bit(bits: u64, set: bool) -> Option<usize> {
-        if set {
-            let tailing_zero_bits = bits.trailing_zeros();
-            if tailing_zero_bits != 64 {
-                Some(tailing_zero_bits as usize)
-            } else {
-                None
-            }
+    pub fn first_one_with_hint_set(&mut self, hint: usize) -> Option<usize> {
+        if let Some(index) = self.first_one_with_hint(hint) {
+            self.set_bit(index, false);
+            Some(index)
         } else {
-            let tailing_one_bits = (!bits).trailing_zeros();
-            if tailing_one_bits != 64 {
-                Some(tailing_one_bits as usize)
-            } else {
-                None
-            }
+            None
         }
     }
-}
-
-pub trait BitMap {
-    fn is_full(&self) -> bool;
-    fn first_one(&self) -> Option<usize>;
-    fn first_one_with_hint(&self, hint: usize) -> Option<usize>;
-    fn first_zero(&self) -> Option<usize>;
-    fn first_zero_with_hint(&self, hint: usize) -> Option<usize>;
-    fn get_bit(&self, index: usize) -> bool;
-    fn set_bit(&mut self, index: usize, bit: bool);
-}
-
-impl BitMap for LocalBitMap {
     #[inline]
-    fn is_full(&self) -> bool {
-        self.free_bits == 0
-    }
-
-    #[inline]
-    fn first_one(&self) -> Option<usize> {
+    pub fn first_one(&self) -> Option<usize> {
         self.first_one_with_hint(0)
-    }
-
-    #[inline]
-    fn first_one_with_hint(&self, hint: usize) -> Option<usize> {
-        let start_index = hint / 64;
-        for index in start_index..self.inner.len() {
-            match LocalBitMap::find_bit(self.inner[index], true) {
-                Some(offset) => return Some(index * 64 + offset),
-                _ => {}
-            }
-        }
-        for index in 0..start_index {
-            match LocalBitMap::find_bit(self.inner[index], true) {
-                Some(offset) => return Some(index * 64 + offset),
-                _ => {}
-            }
-        }
-        None
-    }
-
-    #[inline]
-    fn first_zero(&self) -> Option<usize> {
-        self.first_zero_with_hint(0)
-    }
-
-    #[inline]
-    fn first_zero_with_hint(&self, hint: usize) -> Option<usize> {
-        let start_index = hint / 64;
-        for index in start_index..self.inner.len() {
-            match LocalBitMap::find_bit(self.inner[index], false) {
-                Some(offset) => return Some(index * 64 + offset),
-                _ => {}
-            }
-        }
-        for index in 0..start_index {
-            match LocalBitMap::find_bit(self.inner[index], false) {
-                Some(offset) => return Some(index * 64 + offset),
-                _ => {}
-            }
-        }
-        None
-    }
-
-    #[inline]
-    fn get_bit(&self, index: usize) -> bool {
-        let inner_index = index / 64;
-        let bit_index = index % 64;
-        if inner_index >= self.inner.len() {
-            panic!("range overflow");
-        }
-        let bits = self.inner[inner_index] >> bit_index;
-        bits & 0x1 == 0x1
-    }
-
-    #[inline]
-    fn set_bit(&mut self, index: usize, set: bool) {
-        let _index = index / 64;
-        let bit_index = index % 64;
-        if _index >= self.inner.len() {
-            panic!("range overflow");
-        }
-        let mut bit_flag = 0x1 << bit_index;
-        if !set {
-            bit_flag = !bit_flag;
-        }
-        if set {
-            self.inner[_index] |= bit_flag;
-            self.free_bits -= 1;
-        } else {
-            self.inner[_index] &= bit_flag;
-            self.free_bits += 1;
-        }
     }
 }
 
@@ -348,58 +238,64 @@ mod tests {
     }
     #[test]
     fn test_bitmap_first_one() {
-        let mut bitmap = LocalBitMap::new(512);
-        assert!(!bitmap.is_full());
+        let mut bitmap: BitMap<u32> = BitMap::with_capacity(512);
         assert_eq!(bitmap.first_one(), None);
-        bitmap.inner[0] = 0b1;
+        bitmap.bit_blocks[0] = 0b1;
         assert_eq!(bitmap.first_one(), Some(0));
-        bitmap.inner[0] = 0b10;
+        bitmap.bit_blocks[0] = 0b10;
         assert_eq!(bitmap.first_one(), Some(1));
+        bitmap.bit_blocks[0] = 0b11;
         assert_eq!(bitmap.first_one_with_hint(1), Some(1));
-        bitmap.inner[0] = 0x1 << 62;
-        assert_eq!(bitmap.first_one_with_hint(1), Some(62));
-        bitmap.inner[0] = 0;
-        bitmap.inner[1] = 0b1;
-        assert_eq!(bitmap.first_one_with_hint(2), Some(64));
-        bitmap.inner[1] = 0b1;
+        bitmap.bit_blocks[0] = 0x1 << 31;
+        assert_eq!(bitmap.first_one_with_hint(1), Some(31));
+        bitmap.bit_blocks[0] = 0;
+        bitmap.bit_blocks[1] = 0b1;
+        assert_eq!(bitmap.first_one_with_hint(2), Some(32));
+        bitmap.bit_blocks[0] = 0b1;
+        bitmap.bit_blocks[1] = 0b1;
+        assert_eq!(bitmap.first_one_with_hint(2), Some(32));
+        assert_eq!(bitmap.first_one_with_hint(32), Some(32));
+        assert_eq!(bitmap.first_one_with_hint(31), Some(32));
     }
 
     #[test]
     fn test_bitmap_first_zero() {
-        let mut bitmap = LocalBitMap::new(512);
+        let mut bitmap: BitMap<u32> = BitMap::with_capacity(512);
         assert_eq!(bitmap.first_zero(), Some(0));
-        bitmap.inner[0] = 0b1;
+        bitmap.bit_blocks[0] = 0b1;
         assert_eq!(bitmap.first_zero(), Some(1));
-        assert_eq!(bitmap.first_zero_with_hint(64), Some(64));
-        bitmap.inner[0] = !0;
-        assert_eq!(bitmap.first_zero(), Some(64));
+        assert_eq!(bitmap.first_zero_with_hint(32), Some(32));
+        bitmap.bit_blocks[0] = !0;
+        assert_eq!(bitmap.first_zero(), Some(32));
         for i in 0..7 {
-            bitmap.inner[i] = !0;
+            bitmap.bit_blocks[i] = !0;
         }
-        bitmap.inner[7] = 0b011;
-        assert_eq!(bitmap.first_zero(), Some(64 * 7 + 2));
+        bitmap.bit_blocks[7] = 0b011;
+        assert_eq!(bitmap.first_zero(), Some(32 * 7 + 2));
     }
 
     #[test]
-    fn test_bitmap_get() {
-        let mut bitmap = LocalBitMap::new(512);
-        bitmap.inner[0] = 0b1;
+    fn test_bitmap_get_set() {
+        let mut bitmap: BitMap<u32> = BitMap::with_capacity(512);
+        bitmap.set_bit(0, true);
+        assert_eq!(bitmap.count_ones(), 1);
+        assert_eq!(bitmap.count_zeros(), 511);
+        assert_eq!(bitmap.first_zero_with_hint(0), Some(1));
+        assert_eq!(bitmap.first_one_with_hint(0), Some(0));
         assert_eq!(bitmap.get_bit(0), true);
         assert_eq!(bitmap.get_bit(1), false);
-        bitmap.inner[0] = 0b1000;
+        bitmap.set_bit(3, true);
+        assert_eq!(bitmap.count_ones(), 2);
+        assert_eq!(bitmap.count_zeros(), 510);
+        assert_eq!(bitmap.first_zero_with_hint(0), Some(1));
+        assert_eq!(bitmap.first_one_with_hint(0), Some(0));
+        assert_eq!(bitmap.first_zero_with_hint(3), Some(4));
+        assert_eq!(bitmap.first_one_with_hint(3), Some(3));
         assert_eq!(bitmap.get_bit(3), true);
         assert_eq!(bitmap.get_bit(2), false);
-        bitmap.inner[1] = 0b1;
+        bitmap.set_bit(64, true);
         assert_eq!(bitmap.get_bit(64), true);
         assert_eq!(bitmap.get_bit(65), false);
-    }
-
-    #[test]
-    fn test_bitmap_set() {
-        let mut bitmap = LocalBitMap::new(512);
-        bitmap.set_bit(511, true);
-        assert_eq!(bitmap.inner[7], 1 << 63);
-        assert_eq!(bitmap.get_bit(511), true);
     }
 
 }
