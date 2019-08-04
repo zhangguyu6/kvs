@@ -1,4 +1,5 @@
 #![feature(core_intrinsics)]
+#![feature(weak_counts)]
 #![feature(arbitrary_self_types)]
 mod utils; 
 mod error;
@@ -7,3 +8,4 @@ mod index;
 mod nodetable;
 mod tree;
 mod storage;
+mod cache;

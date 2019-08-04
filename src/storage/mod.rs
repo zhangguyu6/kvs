@@ -1,8 +1,7 @@
 mod allocater;
-mod block_allocater;
-mod block_io;
-mod block_layout;
+mod io;
+mod layout;
 mod segement;
-mod tuple_visitor;
 
-pub use block_layout::{AsBlock, BlockId, BlockOffKind};
+pub use io::G_DEV;
+pub use layout::{BlockDeserialize, BlockId, BlockSerialize, BLOCK_SIZE};

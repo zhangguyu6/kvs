@@ -1,36 +1,28 @@
-use crate::storage::{BlockId, BlockOffKind};
+use crate::storage::BlockId;
 use crate::transaction::{TimeStamp, LOCAL_TS};
-use crate::tree::{Node,NodeKind};
+use crate::tree::{Node, NodeKind, NodePos};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Arc, Weak};
 
 pub struct NodeRef {
-    pub node_ptr: AtomicPtr<Node>,
-    pub block_id: BlockId,
-    pub block_offset_kind: BlockOffKind,
+    // don't own node, just get ref from cache
+    pub node_ptr: Weak<Node>,
+    pub node_pos: NodePos,
+    pub node_kind: NodeKind,
     // commit_ts don't write to disk,but the time when read from dsik/new create
     pub commit_ts: TimeStamp,
 }
 
 impl NodeRef {
     pub fn is_del(&self) -> bool {
-        self.block_id == 0 && self.block_offset_kind.get_kind() == NodeKind::Del
+        self.node_kind == NodeKind::Del
     }
     pub fn del() -> Self {
         Self {
-            node_ptr: AtomicPtr::default(),
-            block_id: 0,
-            block_offset_kind: BlockOffKind::new(0b11),
+            node_ptr: Weak::default(),
+            node_pos: NodePos::default(),
+            node_kind: NodeKind::Del,
             commit_ts: LOCAL_TS.with(|ts| *ts.borrow()),
-        }
-    }
-}
-
-impl Drop for NodeRef {
-    fn drop(&mut self) {
-        let node_ptr = self.node_ptr.load(Ordering::SeqCst);
-        if !node_ptr.is_null() {
-            unsafe { Box::from_raw(node_ptr) };
         }
     }
 }
