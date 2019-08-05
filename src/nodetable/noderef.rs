@@ -8,20 +8,18 @@ pub struct NodeRef {
     // don't own node, just get ref from cache
     pub node_ptr: Weak<Node>,
     pub node_pos: NodePos,
-    pub node_kind: NodeKind,
     // commit_ts don't write to disk,but the time when read from dsik/new create
     pub commit_ts: TimeStamp,
 }
 
 impl NodeRef {
     pub fn is_del(&self) -> bool {
-        self.node_kind == NodeKind::Del
+        self.node_pos == NodePos::default()
     }
     pub fn del() -> Self {
         Self {
             node_ptr: Weak::default(),
             node_pos: NodePos::default(),
-            node_kind: NodeKind::Del,
             commit_ts: LOCAL_TS.with(|ts| *ts.borrow()),
         }
     }
@@ -29,6 +27,7 @@ impl NodeRef {
 
 pub struct Versions {
     pub history: VecDeque<NodeRef>,
+        pub node_kind: NodeKind,
 }
 
 impl Versions {
@@ -69,6 +68,7 @@ impl Default for Versions {
     fn default() -> Self {
         Self {
             history: VecDeque::with_capacity(0),
+            node_kind:NodeKind::default()
         }
     }
 }
