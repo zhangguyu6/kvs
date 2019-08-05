@@ -134,32 +134,19 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         node_pos: &NodePos,
         node_kind: NodeKind,
     ) -> Result<Node, TdbError> {
-        let remain_size = (node_pos.len + node_pos.offset) % BLOCK_SIZE;
-        let buf_len = if remain_size == 0 {
-            node_pos.len + node_pos.offset
-        } else {
-            node_pos.len + node_pos.offset - remain_size + BLOCK_SIZE
-        };
+        let buf_len = node_pos.block_len as usize * BLOCK_SIZE;
         let mut buf = Vec::with_capacity(buf_len);
         self.sync_read(node_pos.block_start, &mut buf)?;
-        Node::read(
-            &buf[node_pos.offset..node_pos.offset + node_pos.len],
-            node_kind,
-        )
+        Node::read(&buf[node_pos.offset as usize..], node_kind)
     }
 
     pub fn sync_write_node(&self, node_pos: &NodePos, node: &Node) -> Result<(), TdbError> {
-        let remain_size = (node_pos.len + node_pos.offset) % BLOCK_SIZE;
-        let buf_len = if remain_size == 0 {
-            node_pos.len + node_pos.offset
-        } else {
-            node_pos.len + node_pos.offset - remain_size + BLOCK_SIZE
-        };
+        let buf_len = node_pos.block_len as usize * BLOCK_SIZE;
         let mut buf = Vec::with_capacity(buf_len);
         if node_pos.offset != 0 {
             self.sync_read(node_pos.block_start, &mut buf[0..BLOCK_SIZE])?;
         }
-        node.write(&mut buf[node_pos.offset..node_pos.offset + node_pos.len])?;
+        node.write(&mut buf)?;
         self.sync_write(node_pos.block_start, &mut buf)
     }
 }
