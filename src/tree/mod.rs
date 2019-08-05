@@ -5,11 +5,14 @@ use std::collections::HashMap;
 use std::mem;
 use std::ops::Range;
 use std::u8;
+
 const KIND_BIT_MASK: u8 = 0b11;
 const MAX_KEY_LEN: usize = u8::MAX as usize;
 const MAX_NODE_SIZE: usize = 4096;
 // key + key len + nodeid
 const SPLIT_NODE_SIZE: usize = 4096 - MAX_KEY_LEN - mem::size_of::<u32>() - mem::size_of::<u8>();
+const REBALANCE_NODE_SIZE: usize = MAX_NODE_SIZE / 4;
+
 #[derive(PartialEq, Eq, Hash)]
 pub enum Node {
     L(Leaf),
@@ -38,6 +41,42 @@ impl Node {
             Node::L(_) => NodeKind::Leaf,
             Node::B(_) => NodeKind::Branch,
             Node::E(_) => NodeKind::Entry,
+        }
+    }
+    pub fn get_branch(&self) -> Option<&Branch> {
+        match self {
+            Node::B(branch) => Some(branch),
+            _ => None,
+        }
+    }
+    pub fn get_entry(&self) -> Option<&Entry> {
+        match self {
+            Node::E(entry) => Some(entry),
+            _ => None,
+        }
+    }
+    pub fn get_leaf(&self) -> Option<&Leaf> {
+        match self {
+            Node::L(leaf) => Some(leaf),
+            _ => None,
+        }
+    }
+    pub fn get_branch_mut(&mut self) -> Option<&mut Branch> {
+        match self {
+            Node::B(branch) => Some(branch),
+            _ => None,
+        }
+    }
+    pub fn get_entry_mut(&mut self) -> Option<&mut Entry> {
+        match self {
+            Node::E(entry) => Some(entry),
+            _ => None,
+        }
+    }
+    pub fn get_leaf_mut(&mut self) -> Option<&mut Leaf> {
+        match self {
+            Node::L(leaf) => Some(leaf),
+            _ => None,
         }
     }
 }
@@ -144,19 +183,77 @@ impl Branch {
         self.keys.insert(index, key);
         self.children.insert(index + 1, node_id);
     }
-    fn split(&mut self) -> Node {
-        unimplemented!()
+    fn split(&mut self) -> (Key, Node) {
+        assert!(self.total_size as usize > SPLIT_NODE_SIZE);
+        let mut split_index = 0;
+        let mut leaf_size = Self::get_header_size();
+        for i in 0..self.keys.len() {
+            leaf_size += self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+            split_index = i;
+            if leaf_size > MAX_NODE_SIZE / 2 {
+                leaf_size -= self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+                break;
+            }
+        }
+        let right_keys = self.keys.split_off(split_index + 1);
+        let right_children = self.children.split_off(split_index + 1);
+        let split_key = self.keys.pop().unwrap();
+        let right_size = self.total_size - leaf_size as u16 + Self::get_header_size() as u16;
+        self.total_size = leaf_size as u16;
+        let right_node = Branch {
+            keys: right_keys,
+            children: right_children,
+            total_size: right_size,
+        };
+        (split_key, Node::B(right_node))
     }
-    fn merge(&mut self, other: &Node) {
-        unimplemented!()
+    // make left del after merge
+    fn merge(&mut self, left: &Branch, merge_key: Key) {
+        assert!(
+            self.total_size as usize + left.total_size as usize - Branch::get_header_size()
+                < SPLIT_NODE_SIZE
+        );
+        self.keys.push(merge_key);
+        for key in left.keys.iter() {
+            self.keys.push(key.clone());
+        }
+        for node_id in left.children.iter() {
+            self.children.push(*node_id);
+        }
+        self.total_size += left.total_size - Branch::get_header_size() as u16;
     }
-    fn rebalance(&mut self, other: &Node) -> Node {
-        unimplemented!()
+    fn rebalance(&mut self, left: &mut Branch, rebalance_key: Key) -> Key {
+        assert!(
+            self.total_size as usize + left.total_size as usize - Branch::get_header_size()
+                > SPLIT_NODE_SIZE
+        );
+        self.keys.push(rebalance_key);
+        self.keys.append(&mut left.keys);
+        self.children.append(&mut left.children);
+        self.total_size += left.total_size - Branch::get_header_size() as u16;
+        let mut split_index = 0;
+        let mut leaf_size = Self::get_header_size();
+        for i in 0..self.keys.len() {
+            leaf_size += self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+            split_index = i;
+            if leaf_size > MAX_NODE_SIZE / 2 {
+                leaf_size -= self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+                break;
+            }
+        }
+        left.keys = self.keys.split_off(split_index + 1);
+        left.children = self.children.split_off(split_index + 1);
+        left.total_size = self.total_size - leaf_size as u16 + Self::get_header_size() as u16;
+        self.total_size = leaf_size as u16;
+        self.keys.pop().unwrap()
     }
     fn should_split(&self) -> bool {
-        unimplemented!()
+        (self.total_size as usize) > SPLIT_NODE_SIZE
     }
     fn should_rebalance(&self) -> bool {
+        (self.total_size as usize) < REBALANCE_NODE_SIZE
+    }
+    fn get_header_size() -> usize {
         unimplemented!()
     }
 }
