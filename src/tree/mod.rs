@@ -1,9 +1,15 @@
 use crate::error::TdbError;
-use crate::nodetable::NodeId;
+use crate::nodetable::{NodeId, G_NAT};
 use crate::storage::{BlockDeserialize, BlockId, BlockSerialize};
+use std::collections::HashMap;
+use std::mem;
 use std::ops::Range;
+use std::u8;
 const KIND_BIT_MASK: u8 = 0b11;
-
+const MAX_KEY_LEN: usize = u8::MAX as usize;
+const MAX_NODE_SIZE: usize = 4096;
+// key + key len + nodeid
+const SPLIT_NODE_SIZE: usize = 4096 - MAX_KEY_LEN - mem::size_of::<u32>() - mem::size_of::<u8>();
 #[derive(PartialEq, Eq, Hash)]
 pub enum Node {
     L(Leaf),
@@ -25,7 +31,13 @@ impl Node {
             Node::L(leaf) => leaf.serialize(writer),
             Node::B(branch) => branch.serialize(writer),
             Node::E(entry) => entry.serialize(writer),
-            _ => unreachable!(),
+        }
+    }
+    pub fn get_kind(&self) -> NodeKind {
+        match self {
+            Node::L(_) => NodeKind::Leaf,
+            Node::B(_) => NodeKind::Branch,
+            Node::E(_) => NodeKind::Entry,
         }
     }
 }
@@ -55,18 +67,25 @@ impl From<u8> for NodeKind {
     }
 }
 
+impl Default for NodeKind {
+    fn default() -> Self {
+        NodeKind::Del
+    }
+}
+
+#[derive(Eq, PartialEq)]
 pub struct NodePos {
     pub block_start: BlockId,
-    pub offset: usize,
-    pub len: usize,
+    pub block_len: u16,
+    pub offset: u16,
 }
 
 impl Default for NodePos {
     fn default() -> Self {
         Self {
             block_start: 0,
+            block_len: 0,
             offset: 0,
-            len: 0,
         }
     }
 }
@@ -113,11 +132,32 @@ pub struct Branch {
 }
 
 impl Branch {
-    fn search(&self, key: &[u8]) -> NodeId {
-        match self.keys.binary_search_by(|_key| _key.as_slice().cmp(key)) {
-            Ok(index) => self.children[index + 1],
-            Err(index) => self.children[index],
-        }
+    fn search(&self, key: &[u8]) -> (NodeId, usize) {
+        let index = match self.keys.binary_search_by(|_key| _key.as_slice().cmp(key)) {
+            Ok(index) => index + 1,
+            Err(index) => index,
+        };
+        (self.children[index], index)
+    }
+    fn insert_non_full(&mut self, index: usize, key: Key, node_id: NodeId) {
+        self.total_size += (key.len() + mem::size_of::<u8>() + mem::size_of::<u32>()) as u16;
+        self.keys.insert(index, key);
+        self.children.insert(index + 1, node_id);
+    }
+    fn split(&mut self) -> Node {
+        unimplemented!()
+    }
+    fn merge(&mut self, other: &Node) {
+        unimplemented!()
+    }
+    fn rebalance(&mut self, other: &Node) -> Node {
+        unimplemented!()
+    }
+    fn should_split(&self) -> bool {
+        unimplemented!()
+    }
+    fn should_rebalance(&self) -> bool {
+        unimplemented!()
     }
 }
 
@@ -153,12 +193,26 @@ impl BlockDeserialize for Entry {
 
 pub struct Tree {
     root: NodeId,
+    dirty_nodes: HashMap<NodeId, Node>,
 }
 
 impl Tree {
     pub fn get(&self, key: &[u8]) -> Option<NodeId> {
         let mut node_id = self.root;
-        unimplemented!()
+        loop {
+            let node = G_NAT
+                .get(node_id)
+                .expect("node data error, point to non-existed-data");
+            match node.as_ref() {
+                Node::L(leaf) => {
+                    return leaf.search(key);
+                }
+                Node::B(branch) => {
+                    node_id = branch.search(key).0;
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 
     // insert only if tree contains key
