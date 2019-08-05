@@ -5,7 +5,7 @@ use super::{
 use crate::cache::GLOBAL_SENDER;
 use crate::storage::G_DEV;
 use crate::transaction::{GLOBAL_MIN_TS, LOCAL_TS};
-use crate::tree::Node;
+use crate::tree::{Node, NodeKind};
 use crate::utils::{BitMap, RadixTree};
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
@@ -35,8 +35,9 @@ impl NodeAddressTable {
                     GLOBAL_SENDER.try_send((node_id, arc_node.clone())).unwrap();
                     return Some(arc_node);
                 } else {
+                    assert!(versions.node_kind != NodeKind::Del);
                     let node = G_DEV
-                        .sync_read_node(&node_ref.node_pos, node_ref.node_kind)
+                        .sync_read_node(&node_ref.node_pos, versions.node_kind)
                         .unwrap();
                     drop(versions);
                     let arc_node = Arc::new(node);
@@ -54,19 +55,24 @@ impl NodeAddressTable {
         }
         None
     }
-
-    pub fn add(&self, first_version: NodeRef) -> Option<NodeId> {
+    pub fn allocate_node_id(&self) -> Option<NodeId> {
         let mut bitmap = self.bitmap.write();
         let last_index = bitmap.1;
         if let Some(new_node_id) = bitmap.0.first_zero_with_hint_set(last_index) {
-            let mut new_node = self.tree.get_or_touchwritelock(new_node_id as u32);
-            assert!(new_node.history.is_empty());
-            new_node.history.push_back(first_version);
             bitmap.1 = new_node_id;
             Some(new_node_id as u32)
         } else {
             None
         }
+    }
+
+    pub fn add(&self, node_id: NodeId, version: NodeRef) {
+        let mut new_versions = self.tree.get_or_touchwritelock(node_id as u32);
+        assert!(new_versions.history.is_empty());
+        assert!(new_versions.node_kind == NodeKind::Del);
+        // change node_kind from DEl to other
+        new_versions.node_kind = version.node_ptr.upgrade().unwrap().get_kind();
+        new_versions.history.push_back(version);
     }
 
     //  None if no need to gc, Some(node_id) for next gc
@@ -107,6 +113,7 @@ impl NodeAddressTable {
             let mut bitmap = self.bitmap.write();
             bitmap.0.set_bit(node_id as usize, false);
             bitmap.1 = node_id as usize;
+            versions.node_kind = NodeKind::Del;
             None
         } else {
             let version = NodeRef::del();
