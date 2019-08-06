@@ -1,5 +1,5 @@
 use crate::error::TdbError;
-use crate::nodetable::{NodeId, G_NAT};
+use crate::nodetable::{NodeId};
 use crate::storage::{BlockDeserialize, BlockId, BlockSerialize};
 use std::collections::HashMap;
 use std::mem;
@@ -367,23 +367,23 @@ pub struct Tree {
 }
 
 impl Tree {
-    pub fn get(&self, key: &[u8]) -> Option<NodeId> {
-        let mut node_id = self.root;
-        loop {
-            let node = G_NAT
-                .get(node_id)
-                .expect("node data error, point to non-existed-data");
-            match node.as_ref() {
-                Node::L(leaf) => {
-                    return leaf.search(key);
-                }
-                Node::B(branch) => {
-                    node_id = branch.search(key).0;
-                }
-                _ => unreachable!(),
-            }
-        }
-    }
+    // pub fn get(&self, key: &[u8]) -> Option<NodeId> {
+    //     let mut node_id = self.root;
+    //     loop {
+    //         let node = G_NAT
+    //             .get(node_id)
+    //             .expect("node data error, point to non-existed-data");
+    //         match node.as_ref() {
+    //             Node::L(leaf) => {
+    //                 return leaf.search(key);
+    //             }
+    //             Node::B(branch) => {
+    //                 node_id = branch.search(key).0;
+    //             }
+    //             _ => unreachable!(),
+    //         }
+    //     }
+    // }
 
     // insert only if tree contains key
     pub fn insert(&mut self, key: Vec<u8>, node_id: NodeId) {

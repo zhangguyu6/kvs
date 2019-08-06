@@ -1,8 +1,7 @@
-use crate::storage::BlockId;
 use crate::transaction::{TimeStamp, LOCAL_TS};
 use crate::tree::{Node, NodeKind, NodePos};
 use std::collections::VecDeque;
-use std::sync::{Arc, Weak};
+use std::sync::Weak;
 
 pub struct NodeRef {
     // don't own node, just get ref from cache
@@ -27,7 +26,7 @@ impl NodeRef {
 
 pub struct Versions {
     pub history: VecDeque<NodeRef>,
-        pub node_kind: NodeKind,
+    pub node_kind: NodeKind,
 }
 
 impl Versions {
@@ -68,7 +67,7 @@ impl Default for Versions {
     fn default() -> Self {
         Self {
             history: VecDeque::with_capacity(0),
-            node_kind:NodeKind::default()
+            node_kind: NodeKind::default(),
         }
     }
 }

@@ -1,6 +1,9 @@
+mod node_address_allocater;
 mod node_address_table;
+mod node_manager;
 mod noderef;
-use crate::storage::BlockId;
+pub use node_address_table::NodeAddressTable;
 pub use noderef::NodeRef;
-pub use node_address_table::G_NAT;
+pub use node_manager::ReadonlyNodeManager;
+pub use node_address_allocater::NodeAddressAllocater;
 pub type NodeId = u32;

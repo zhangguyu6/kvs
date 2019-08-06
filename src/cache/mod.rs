@@ -1,58 +1,152 @@
 use crate::nodetable::NodeId;
+use crate::transaction::{TimeStamp, LOCAL_TS};
 use crate::tree::Node;
 use crossbeam::{
-    channel::{unbounded, Receiver, Sender, TryRecvError},
+    channel::{unbounded, Sender, TryRecvError},
     utils::Backoff,
 };
-use lazy_static::lazy_static;
 use lru_cache::LruCache;
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::thread;
+
 const MAX_LRUCACHE_SIZE: usize = 1 << 16;
+const MAX_LOCAL_CACHE_SIZE: usize = 512;
+thread_local!(pub static LOCAL_CACHE: RefCell<Option<LruCache<NodeId,Arc<Node>>>> = RefCell::new(None));
 
-lazy_static! {
-    pub static ref GLOBAL_SENDER: Sender<(NodeId, Arc<Node>)> = {
-        let (node_cache, sender) = NodeCache::new(MAX_LRUCACHE_SIZE);
-        node_cache.background();
-        sender
-    };
+pub trait ReadonlyNodeCache: Sync + Send {
+    fn insert(&self, node_id: NodeId, arc_node: Arc<Node>);
+    fn remove(&self, node_id: NodeId);
+    fn clear(&self);
+    fn close(&self);
 }
 
-pub struct NodeCache {
-    cache: LruCache<NodeId, Arc<Node>>,
-    receiver: Receiver<(NodeId, Arc<Node>)>,
+enum NodeCacheOp {
+    Insert(NodeId, TimeStamp, Arc<Node>),
+    Remove(NodeId, TimeStamp),
+    Clear,
+    Close,
 }
 
-impl NodeCache {
-    pub fn new(cap: usize) -> (Self, Sender<(NodeId, Arc<Node>)>) {
+pub struct BackgroundNodeCache {
+    sender: Sender<NodeCacheOp>,
+}
+
+impl BackgroundNodeCache {
+    pub fn new(cap: usize) -> Self {
         let (sender, receiver) = unbounded();
-        (
-            Self {
-                cache: LruCache::new(cap),
-                receiver: receiver,
-            },
-            sender,
-        )
-    }
-
-    pub fn background(mut self) {
+        let mut cache = LruCache::new(cap);
         thread::spawn(move || loop {
             let backoff = Backoff::new();
-            match self.receiver.try_recv() {
-                Ok((key, val)) => {
-                    self.cache.insert(key, val);
-                    backoff.reset()
+            match receiver.try_recv() {
+                Ok(op) => {
+                    match op {
+                        NodeCacheOp::Insert(node_id, ts, arc_node) => {
+                            cache.insert((node_id, ts), arc_node);
+                        }
+                        NodeCacheOp::Remove(node_id, ts) => {
+                            cache.remove(&(node_id, ts));
+                        }
+                        NodeCacheOp::Clear => {
+                            cache.clear();
+                        }
+                        NodeCacheOp::Close => {
+                            break;
+                        }
+                    }
+                    backoff.reset();
                 }
                 Err(err) => match err {
                     TryRecvError::Empty => {
                         backoff.spin();
                     }
                     TryRecvError::Disconnected => {
-                        self.cache.clear();
+                        cache.clear();
                         break;
                     }
                 },
             }
         });
+
+        BackgroundNodeCache { sender }
     }
+}
+
+impl ReadonlyNodeCache for BackgroundNodeCache {
+    fn insert(&self, node_id: NodeId, arc_node: Arc<Node>) {
+        let ts = LOCAL_TS.with(|ts| *ts.borrow());
+        self.sender
+            .try_send(NodeCacheOp::Insert(node_id, ts, arc_node))
+            .expect("send error");
+    }
+    fn remove(&self, node_id: NodeId) {
+        let ts = LOCAL_TS.with(|ts| *ts.borrow());
+        self.sender
+            .try_send(NodeCacheOp::Remove(node_id, ts))
+            .expect("send error");
+    }
+    fn clear(&self) {
+        self.sender
+            .try_send(NodeCacheOp::Clear)
+            .expect("send error");
+    }
+    fn close(&self) {
+        self.sender
+            .try_send(NodeCacheOp::Close)
+            .expect("send error");
+    }
+}
+
+pub struct LocalNodeCache {}
+
+impl LocalNodeCache {
+    pub fn new(cap: usize) -> Self {
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            *cache_mut = Some(LruCache::new(cap));
+        });
+        Self {}
+    }
+}
+
+impl Drop for LocalNodeCache {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+impl ReadonlyNodeCache for LocalNodeCache {
+    fn insert(&self, node_id: NodeId, arc_node: Arc<Node>) {
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            cache_mut.as_mut().unwrap().insert(node_id, arc_node);
+        });
+    }
+    fn remove(&self, node_id: NodeId) {
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            cache_mut.as_mut().unwrap().remove(&node_id);
+        });
+    }
+    fn clear(&self) {
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            cache_mut.as_mut().unwrap().clear();
+        });
+    }
+    fn close(&self) {
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            *cache_mut = None;
+        });
+    }
+}
+
+pub trait DirtyNodeCache {
+    fn insert(&mut self, node_id: NodeId, node: Node) -> Option<Node>;
+    fn remove(&mut self, node_id: NodeId) -> Option<Node>;
+    fn contain(&self, node_id: NodeId) -> bool;
+    fn get_ref(&self, node_id: NodeId) -> Option<&Node>;
+    fn get_mut(&mut self, node_id: NodeId) -> Option<&mut Node>;
+    fn clear(&mut self);
 }
