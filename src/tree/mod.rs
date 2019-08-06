@@ -149,6 +149,79 @@ impl Leaf {
             _ => None,
         }
     }
+    fn insert_non_full(&mut self, key: Key, node_id: NodeId) {
+        match self.entrys.binary_search_by(|_key| _key.0.cmp(&key)) {
+            Ok(_) => panic!("insert duplication entry"),
+            Err(index) => {
+                self.total_size +=
+                    (key.len() + mem::size_of::<u8>() + mem::size_of::<u32>()) as u16;
+                self.entrys.insert(index, (key, node_id));
+            }
+        }
+    }
+    fn split(&mut self) -> (Key, Node) {
+        assert!(self.total_size as usize > SPLIT_NODE_SIZE);
+        let mut split_index = 0;
+        let mut left_size = Self::get_header_size();
+        for i in 0..self.entrys.len() {
+            left_size += self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+            split_index = i;
+            if left_size > MAX_NODE_SIZE / 2 {
+                left_size -= self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<u32>();;
+                break;
+            }
+        }
+        let right_entrys = self.entrys.split_off(split_index);
+        let split_key = right_entrys[0].0.clone();
+        let right_size = self.total_size - left_size as u16 + Self::get_header_size() as u16;
+        self.total_size = left_size as u16;
+        let right_node = Leaf {
+            entrys: right_entrys,
+            total_size: right_size,
+        };
+        (split_key, Node::L(right_node))
+    }
+    fn merge(&mut self, left: &Leaf) {
+        assert!(
+            self.total_size as usize + left.total_size as usize - Leaf::get_header_size()
+                < SPLIT_NODE_SIZE
+        );
+        for entry in left.entrys.iter() {
+            self.entrys.push(entry.clone());
+        }
+        self.total_size += left.total_size - Self::get_header_size() as u16;
+    }
+    fn rebalance(&mut self, left: &mut Leaf) -> Key {
+        assert!(
+            self.total_size as usize + left.total_size as usize - Self::get_header_size()
+                > SPLIT_NODE_SIZE
+        );
+        self.entrys.append(&mut left.entrys);
+        self.total_size += left.total_size - Branch::get_header_size() as u16;
+        let mut split_index = 0;
+        let mut left_size = Self::get_header_size();
+        for i in 0..self.entrys.len() {
+            left_size += self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+            split_index = i;
+            if left_size > MAX_NODE_SIZE / 2 {
+                left_size -= self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<u32>();;
+                break;
+            }
+        }
+        left.entrys = self.entrys.split_off(split_index);
+        left.total_size = self.total_size - left_size as u16 + Self::get_header_size() as u16;
+        self.total_size = left_size as u16;
+        left.entrys[0].0.clone()
+    }
+    fn should_split(&self) -> bool {
+        (self.total_size as usize) > SPLIT_NODE_SIZE
+    }
+    fn should_rebalance(&self) -> bool {
+        (self.total_size as usize) < REBALANCE_NODE_SIZE
+    }
+    fn get_header_size() -> usize {
+        unimplemented!()
+    }
 }
 
 impl BlockSerialize for Leaf {
@@ -186,20 +259,20 @@ impl Branch {
     fn split(&mut self) -> (Key, Node) {
         assert!(self.total_size as usize > SPLIT_NODE_SIZE);
         let mut split_index = 0;
-        let mut leaf_size = Self::get_header_size();
+        let mut left_size = Self::get_header_size();
         for i in 0..self.keys.len() {
-            leaf_size += self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+            left_size += self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
             split_index = i;
-            if leaf_size > MAX_NODE_SIZE / 2 {
-                leaf_size -= self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
+            if left_size > MAX_NODE_SIZE / 2 {
+                left_size -= self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<u32>();
                 break;
             }
         }
         let right_keys = self.keys.split_off(split_index + 1);
         let right_children = self.children.split_off(split_index + 1);
         let split_key = self.keys.pop().unwrap();
-        let right_size = self.total_size - leaf_size as u16 + Self::get_header_size() as u16;
-        self.total_size = leaf_size as u16;
+        let right_size = self.total_size - left_size as u16 + Self::get_header_size() as u16;
+        self.total_size = left_size as u16;
         let right_node = Branch {
             keys: right_keys,
             children: right_children,
