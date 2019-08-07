@@ -3,9 +3,10 @@ use super::{
     NodeId,
 };
 use crate::storage::{BlockDev, RawBlockDev};
-use crate::transaction::{GLOBAL_MIN_TS, LOCAL_TS};
+use crate::transaction::TimeStamp;
+use crate::transaction::GLOBAL_MIN_TS;
 use crate::tree::{Node, NodeKind};
-use crate::utils::RadixTree;
+use crate::utils::{RadixTree,ArcCow};
 use std::sync::{atomic::Ordering, Arc};
 
 pub struct NodeAddressTable<Dev> {
@@ -29,9 +30,9 @@ impl<Dev: RawBlockDev + Unpin> NodeAddressTable<Dev> {
             dev: dev,
         }
     }
-    pub fn get(&self, node_id: NodeId) -> Option<Arc<Node>> {
+    pub fn get(&self, node_id: NodeId, ts: TimeStamp) -> Option<Arc<Node>> {
         if let Some(versions) = self.tree.get_readlock(node_id) {
-            let node_ref = versions.find_node_ref(LOCAL_TS.with(|ts| *ts.borrow()));
+            let node_ref = versions.find_node_ref(ts);
             if let Some(node_ref) = node_ref {
                 if let Some(arc_node) = node_ref.node_ptr.upgrade() {
                     return Some(arc_node);
@@ -44,9 +45,7 @@ impl<Dev: RawBlockDev + Unpin> NodeAddressTable<Dev> {
                     drop(versions);
                     let arc_node = Arc::new(node);
                     let mut versions = self.tree.get_writelock(node_id).unwrap();
-                    let node_mut = versions
-                        .find_node_mut(LOCAL_TS.with(|ts| *ts.borrow()))
-                        .unwrap();
+                    let node_mut = versions.find_node_mut(ts).unwrap();
                     if node_mut.node_ptr.strong_count() == 0 {
                         node_mut.node_ptr = Arc::downgrade(&arc_node);
                     }

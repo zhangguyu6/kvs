@@ -16,7 +16,7 @@ lazy_static! {
     pub static ref G_DEV: BlockDev<FileBlockDev> = { BlockDev::new(FileBlockDev::default()) };
 }
 
-pub trait RawBlockDev {
+pub trait RawBlockDev: Sync + Send {
     // buf must align to block size
     fn read(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError>;
     fn write(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError>;
