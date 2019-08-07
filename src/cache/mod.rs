@@ -1,6 +1,7 @@
 use crate::nodetable::NodeId;
 use crate::transaction::TimeStamp;
 use crate::tree::Node;
+use crate::utils::ArcCow;
 use crossbeam::{
     channel::{unbounded, Sender, TryRecvError},
     utils::Backoff,
@@ -158,8 +159,9 @@ pub trait DirtyNodeCache {
     fn insert(&mut self, node_id: NodeId, node: NodeState) -> Option<NodeState>;
     fn remove(&mut self, node_id: NodeId) -> Option<NodeState>;
     fn contain(&mut self, node_id: NodeId) -> bool;
-    fn get_ref(&self, node_id: NodeId) -> Option<&NodeState>;
-    fn get_mut(&mut self, node_id: NodeId) -> Option<&mut NodeState>;
+    fn get_ref(&mut self, node_id: NodeId) -> (Option<ArcCow<Node>>, bool);
+    // must insert before get_mut
+    fn get_mut(&mut self, node_id: NodeId) -> &mut Node;
     fn drain(self) -> Box<dyn Iterator<Item = (NodeId, NodeState)>>;
 }
 
@@ -212,11 +214,25 @@ impl DirtyNodeCache for LocalDirtyNodeCache {
     fn contain(&mut self, node_id: NodeId) -> bool {
         self.dirties.contains_key(&node_id) || self.cache.contains_key(&node_id)
     }
-    fn get_ref(&self, node_id: NodeId) -> Option<&NodeState> {
-        self.dirties.get(&node_id)
+    fn get_ref(&mut self, node_id: NodeId) -> (Option<ArcCow<Node>>, bool) {
+        if let Some(nodestate) = self.dirties.get(&node_id) {
+            if nodestate.is_dirty() {
+                (Some(ArcCow::from(nodestate.get_ref())), false)
+            } else {
+                (None, false)
+            }
+        } else {
+            (
+                self.cache
+                    .get_mut(&node_id)
+                    .map(|arc_node| ArcCow::from(arc_node.clone())),
+                true,
+            )
+        }
     }
-    fn get_mut(&mut self, node_id: NodeId) -> Option<&mut NodeState> {
-        self.dirties.get_mut(&node_id)
+    fn get_mut(&mut self, node_id: NodeId) -> &mut Node {
+        assert!(self.dirties.contains_key(&node_id));
+        self.dirties.get_mut(&node_id).unwrap().get_mut()
     }
     fn drain(self) -> Box<dyn Iterator<Item = (NodeId, NodeState)>> {
         Box::new(self.dirties.into_iter())

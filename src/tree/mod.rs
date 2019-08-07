@@ -13,7 +13,7 @@ const MAX_NODE_SIZE: usize = 4096;
 const SPLIT_NODE_SIZE: usize = 4096 - MAX_KEY_LEN - mem::size_of::<u32>() - mem::size_of::<u8>();
 const REBALANCE_NODE_SIZE: usize = MAX_NODE_SIZE / 4;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash,Clone)]
 pub enum Node {
     L(Leaf),
     B(Branch),
@@ -133,7 +133,7 @@ type Key = Vec<u8>;
 
 type Val = Vec<u8>;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash,Clone)]
 pub struct Leaf {
     entrys: Vec<(Key, NodeId)>,
     total_size: u16,
@@ -236,7 +236,7 @@ impl BlockDeserialize for Leaf {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash,Clone)]
 pub struct Branch {
     keys: Vec<Key>,
     children: Vec<NodeId>,
@@ -343,7 +343,7 @@ impl BlockDeserialize for Branch {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash,Clone)]
 pub struct Entry {
     key: Key,
     val: Val,
