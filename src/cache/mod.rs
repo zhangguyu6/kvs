@@ -8,7 +8,8 @@ use crossbeam::{
 };
 use lru_cache::LruCache;
 use std::cell::RefCell;
-use std::collections::{hash_map::Drain, HashMap};
+use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 use std::thread;
 thread_local!(pub static LOCAL_CACHE: RefCell<Option<LruCache<NodeId,Arc<Node>>>> = RefCell::new(None));
@@ -156,85 +157,149 @@ impl ReadonlyNodeCache for LocalNodeCache {
 }
 
 pub trait DirtyNodeCache {
-    fn insert(&mut self, node_id: NodeId, node: NodeState) -> Option<NodeState>;
-    fn remove(&mut self, node_id: NodeId) -> Option<NodeState>;
-    fn contain(&mut self, node_id: NodeId) -> bool;
-    fn get_ref(&mut self, node_id: NodeId) -> (Option<ArcCow<Node>>, bool);
-    // must insert before get_mut
-    fn get_mut(&mut self, node_id: NodeId) -> &mut Node;
-    fn drain(self) -> Box<dyn Iterator<Item = (NodeId, NodeState)>>;
+    fn insert(&mut self, node_id: NodeId, node: DirtyNode) -> Option<DirtyNode>;
+    fn remove(&mut self, node_id: &NodeId) -> Option<DirtyNode>;
+    fn contain(&mut self, node_id: &NodeId) -> bool;
+    fn get_mut(&mut self, node_id: &NodeId) -> Option<&mut DirtyNode>;
+    fn get_mut_dirty(&mut self, node_id: &NodeId) -> Option<&mut DirtyNode>;
+    fn drain(&mut self) -> Box<dyn Iterator<Item = (NodeId, DirtyNode)>>;
 }
 
-pub enum NodeState {
+pub enum DirtyNode {
+    Readonly(Arc<Node>),
     Dirty(Node),
+    New(Node),
     Del,
 }
 
-impl NodeState {
-    pub fn get(self) -> Node {
+impl From<Arc<Node>> for DirtyNode {
+    fn from(arc_node: Arc<Node>) -> Self {
+        DirtyNode::Readonly(arc_node)
+    }
+}
+
+impl From<Node> for DirtyNode {
+    fn from(node: Node) -> Self {
+        DirtyNode::New(node)
+    }
+}
+
+impl Default for DirtyNode {
+    fn default() -> Self {
+        Self::Del
+    }
+}
+
+impl Clone for DirtyNode {
+    fn clone(&self) -> Self {
+        use DirtyNode::*;
         match self {
-            NodeState::Dirty(node) => node,
+            Readonly(node) => Readonly(node.clone()),
+            Dirty(node) => Dirty(node.clone()),
+            New(node) => New(node.clone()),
+            Del => Del,
+        }
+    }
+}
+
+impl DirtyNode {
+    pub fn drain(self) -> Node {
+        match self {
+            DirtyNode::Dirty(node) => node,
             _ => unreachable!(),
         }
     }
-    pub fn get_ref(&self) -> &Node {
+    pub fn get_ref(&self) -> ArcCow<Node> {
         match self {
-            NodeState::Dirty(node) => node,
+            DirtyNode::Dirty(node) => ArcCow::from(node),
+            DirtyNode::New(node) => ArcCow::from(node),
+            DirtyNode::Readonly(node) => ArcCow::from(node.clone()),
             _ => unreachable!(),
         }
     }
     pub fn get_mut(&mut self) -> &mut Node {
         match self {
-            NodeState::Dirty(node) => node,
+            DirtyNode::Dirty(node) => node,
+            DirtyNode::New(node) => node,
             _ => unreachable!(),
         }
     }
+    pub fn to_dirty(&mut self) {
+        assert!(self.is_readonly());
+        let node = self.get_ref().into_owned();
+        *self = Self::Dirty(node);
+    }
     pub fn is_dirty(&self) -> bool {
         match self {
-            NodeState::Dirty(_) => true,
+            DirtyNode::Dirty(_) => true,
+            _ => false,
+        }
+    }
+    pub fn is_new(&self) -> bool {
+        match self {
+            DirtyNode::New(_) => true,
+            _ => false,
+        }
+    }
+    pub fn is_del(&self) -> bool {
+        match self {
+            DirtyNode::Del => true,
+            _ => false,
+        }
+    }
+    pub fn is_readonly(&self) -> bool {
+        match self {
+            DirtyNode::Readonly(_) => true,
             _ => false,
         }
     }
 }
 
 pub struct LocalDirtyNodeCache {
-    dirties: HashMap<NodeId, NodeState>,
-    cache: LruCache<NodeId, Arc<Node>>,
+    dirties: HashMap<NodeId, DirtyNode>,
+    cache: LruCache<NodeId, DirtyNode>,
 }
 
+/// New, Dirty, Del in dirties and Readonly in cache,
+/// There is no intersection between the dirties and cache
 impl DirtyNodeCache for LocalDirtyNodeCache {
-    fn insert(&mut self, node_id: NodeId, node: NodeState) -> Option<NodeState> {
-        self.cache.remove(&node_id);
-        self.dirties.insert(node_id, node)
-    }
-    fn remove(&mut self, node_id: NodeId) -> Option<NodeState> {
-        self.cache.remove(&node_id);
-        self.dirties.insert(node_id, NodeState::Del)
-    }
-    fn contain(&mut self, node_id: NodeId) -> bool {
-        self.dirties.contains_key(&node_id) || self.cache.contains_key(&node_id)
-    }
-    fn get_ref(&mut self, node_id: NodeId) -> (Option<ArcCow<Node>>, bool) {
-        if let Some(nodestate) = self.dirties.get(&node_id) {
-            if nodestate.is_dirty() {
-                (Some(ArcCow::from(nodestate.get_ref())), false)
-            } else {
-                (None, false)
-            }
+    // Readonly can only be inserted in cache if node isn't dirty
+    fn insert(&mut self, node_id: NodeId, node: DirtyNode) -> Option<DirtyNode> {
+        if node.is_readonly() {
+            assert!(!self.dirties.contains_key(&node_id));
+            self.cache.insert(node_id, node)
         } else {
-            (
-                self.cache
-                    .get_mut(&node_id)
-                    .map(|arc_node| ArcCow::from(arc_node.clone())),
-                true,
-            )
+            let old_node = self.remove(&node_id);
+            self.dirties.insert(node_id, node);
+            old_node
         }
     }
-    fn get_mut(&mut self, node_id: NodeId) -> &mut Node {
-        assert!(self.dirties.contains_key(&node_id));
-        self.dirties.get_mut(&node_id).unwrap().get_mut()
+    fn remove(&mut self, node_id: &NodeId) -> Option<DirtyNode> {
+        let old_node = self.cache.remove(&node_id);
+        if old_node.is_some() {
+            return old_node;
+        }
+        self.dirties.remove(&node_id)
     }
-    fn drain(self) -> Box<dyn Iterator<Item = (NodeId, NodeState)>> {
-        Box::new(self.dirties.into_iter())
+    fn contain(&mut self, node_id: &NodeId) -> bool {
+        self.dirties.contains_key(&node_id) || self.cache.contains_key(&node_id)
+    }
+    fn get_mut(&mut self, node_id: &NodeId) -> Option<&mut DirtyNode> {
+        let node_mut = self.dirties.get_mut(&node_id);
+        if node_mut.is_some() {
+            return node_mut;
+        }
+        self.cache.get_mut(&node_id)
+    }
+    fn get_mut_dirty(&mut self, node_id: &NodeId) -> Option<&mut DirtyNode> {
+        if let Some(mut node) = self.cache.remove(node_id) {
+            node.to_dirty();
+            self.dirties.insert(*node_id, node);
+        }
+        self.get_mut(node_id)
+    }
+    fn drain(&mut self) -> Box<dyn Iterator<Item = (NodeId, DirtyNode)>> {
+        self.cache.clear();
+        Box::new(mem::replace(&mut self.dirties, HashMap::with_capacity(0)).into_iter())
     }
 }
