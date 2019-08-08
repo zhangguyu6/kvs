@@ -6,7 +6,7 @@ use crate::storage::{BlockDev, RawBlockDev};
 use crate::transaction::TimeStamp;
 use crate::transaction::GLOBAL_MIN_TS;
 use crate::tree::{Node, NodeKind};
-use crate::utils::{RadixTree,ArcCow};
+use crate::utils::{ArcCow, RadixTree};
 use std::sync::{atomic::Ordering, Arc};
 
 pub struct NodeAddressTable<Dev> {
@@ -87,7 +87,7 @@ impl<Dev: RawBlockDev + Unpin> NodeAddressTable<Dev> {
     }
 
     // remove node from radixtree
-    // if versions is empty return node_id and free,
+    // if versions is empty ,free and return None,
     // else return None and try remove next time
     pub fn remove(&self, node_id: NodeId) -> Option<NodeId> {
         let mut versions = self.tree.get_writelock(node_id).unwrap();
@@ -104,11 +104,9 @@ impl<Dev: RawBlockDev + Unpin> NodeAddressTable<Dev> {
         if versions.history.len() == 0 {
             versions.history.shrink_to_fit();
             versions.node_kind = NodeKind::Del;
-            Some(node_id)
-        } else {
-            let version = NodeRef::del();
-            versions.history.push_back(version);
             None
+        } else {
+            Some(node_id)
         }
     }
 }
