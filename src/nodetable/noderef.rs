@@ -7,21 +7,8 @@ pub struct NodeRef {
     // don't own node, just get ref from cache
     pub node_ptr: Weak<Node>,
     pub node_pos: NodePos,
-    // commit_ts don't write to disk,but the time when read from dsik/new create
+    // commit_ts don't represent time write to disk,but time when from dsik/new create
     pub commit_ts: TimeStamp,
-}
-
-impl NodeRef {
-    pub fn is_del(&self) -> bool {
-        self.node_pos == NodePos::default()
-    }
-    pub fn del() -> Self {
-        Self {
-            node_ptr: Weak::default(),
-            node_pos: NodePos::default(),
-            commit_ts: LOCAL_TS.with(|ts| *ts.borrow()),
-        }
-    }
 }
 
 pub struct Versions {
