@@ -3,8 +3,7 @@ use super::{
     NodeId,
 };
 use crate::storage::{BlockDev, RawBlockDev};
-use crate::transaction::TimeStamp;
-use crate::transaction::GLOBAL_MIN_TS;
+use crate::transaction::{TimeStamp, GLOBAL_MIN_TS, MAX_TS};
 use crate::tree::{Node, NodeKind};
 use crate::utils::{ArcCow, RadixTree};
 use std::sync::{atomic::Ordering, Arc};
@@ -69,15 +68,10 @@ impl<Dev: RawBlockDev + Unpin> NodeAddressTable<Dev> {
     pub fn append(&self, node_id: NodeId, version: NodeRef) -> Option<NodeId> {
         let mut versions = self.tree.get_writelock(node_id).unwrap();
         let min_ts = GLOBAL_MIN_TS.load(Ordering::SeqCst);
-        loop {
-            if let Some(version) = versions.history.front() {
-                if version.commit_ts < min_ts {
-                    let version = versions.history.pop_front().unwrap();
-                    drop(version)
-                }
-            }
-            break;
+        if let Some(_version) = versions.history.back_mut() {
+            _version.end_ts = version.start_ts;
         }
+        versions.try_clear(min_ts);
         versions.history.push_back(version);
         if versions.history.len() == 1 {
             None
@@ -89,18 +83,15 @@ impl<Dev: RawBlockDev + Unpin> NodeAddressTable<Dev> {
     // remove node from radixtree
     // if versions is empty ,free and return None,
     // else return None and try remove next time
-    pub fn remove(&self, node_id: NodeId) -> Option<NodeId> {
+    pub fn remove(&self, node_id: NodeId, ts: TimeStamp) -> Option<NodeId> {
         let mut versions = self.tree.get_writelock(node_id).unwrap();
-        let min_ts = GLOBAL_MIN_TS.load(Ordering::SeqCst);
-        loop {
-            if let Some(version) = versions.history.front() {
-                if version.commit_ts < min_ts {
-                    let version = versions.history.pop_front().unwrap();
-                    drop(version)
-                }
+        if let Some(_version) = versions.history.back_mut() {
+            if _version.end_ts == MAX_TS {
+                _version.end_ts = ts;
             }
-            break;
         }
+        let min_ts = GLOBAL_MIN_TS.load(Ordering::SeqCst);
+        versions.try_clear(min_ts);
         if versions.history.len() == 0 {
             versions.history.shrink_to_fit();
             versions.node_kind = NodeKind::Del;

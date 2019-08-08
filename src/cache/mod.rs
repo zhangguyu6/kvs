@@ -16,7 +16,7 @@ thread_local!(pub static LOCAL_CACHE: RefCell<Option<LruCache<NodeId,Arc<Node>>>
 const MAX_LRUCACHE_SIZE: usize = 1 << 16;
 const MAX_LOCAL_CACHE_SIZE: usize = 512;
 
-pub trait ReadonlyNodeCache: Sync + Send {
+pub trait ReadonlyNodeCache: Send {
     fn insert(&self, node_id: NodeId, ts: TimeStamp, arc_node: Arc<Node>);
     fn get(&self, node_id: NodeId, ts: TimeStamp) -> Option<Arc<Node>>;
     fn remove(&self, node_id: NodeId, ts: TimeStamp);
@@ -303,3 +303,4 @@ impl DirtyNodeCache for LocalDirtyNodeCache {
         Box::new(mem::replace(&mut self.dirties, HashMap::with_capacity(0)).into_iter())
     }
 }
+ 

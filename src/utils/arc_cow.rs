@@ -6,14 +6,14 @@ pub enum ArcCow<'a, T> {
 }
 
 impl<'a, T: Clone> ArcCow<'a, T> {
-    fn into_owned(self) -> T {
+    pub fn into_owned(self) -> T {
         match self {
             ArcCow::Owned(t) => t.as_ref().clone(),
             ArcCow::Borrowed(t) => t.clone(),
         }
     }
 
-    fn is_owned(&self) -> bool {
+    pub fn is_owned(&self) -> bool {
         match self {
             ArcCow::Owned(_) => true,
             _ => false,

@@ -34,7 +34,7 @@ impl<Dev: RawBlockDev + Unpin, Cache: ReadonlyNodeCache> ReadonlyNodeManager<Dev
 
 pub struct DirtyNodeManager<Dev, Cache = LocalDirtyNodeCache> {
     node_table: NodeAddressTable<Dev>,
-    node_dirties: Cache,
+    node_cache: Cache,
     node_allocater: NodeAddressAllocater,
     ts: TimeStamp,
 }
@@ -42,19 +42,19 @@ pub struct DirtyNodeManager<Dev, Cache = LocalDirtyNodeCache> {
 impl<Dev: RawBlockDev + Unpin, Cache: DirtyNodeCache> DirtyNodeManager<Dev, Cache> {
     pub fn get_ref(&mut self, node_id: NodeId) -> Option<ArcCow<Node>> {
         // first find in cache
-        if !self.node_dirties.contain(&node_id) {
+        if !self.node_cache.contain(&node_id) {
             if let Some(arc_node) = self.node_table.get(node_id, self.ts) {
                 // not cache entry
                 if arc_node.get_entry().is_some() {
                     return Some(ArcCow::from(arc_node));
                 }
-                self.node_dirties
+                self.node_cache
                     .insert(node_id, DirtyNode::from(arc_node.clone()));
             } else {
                 return None;
             }
         }
-        if let Some(dirtynode) = self.node_dirties.get_mut(&node_id) {
+        if let Some(dirtynode) = self.node_cache.get_mut(&node_id) {
             if !dirtynode.is_del() {
                 return Some(dirtynode.get_ref());
             }
@@ -63,15 +63,15 @@ impl<Dev: RawBlockDev + Unpin, Cache: DirtyNodeCache> DirtyNodeManager<Dev, Cach
     }
     pub fn get_mut(&mut self, node_id: NodeId) -> Option<&mut Node> {
         // not find in cache, read in disk
-        if !self.node_dirties.contain(&node_id) {
+        if !self.node_cache.contain(&node_id) {
             if let Some(arc_node) = self.node_table.get(node_id, self.ts) {
-                self.node_dirties
+                self.node_cache
                     .insert(node_id, DirtyNode::from(arc_node.clone()));
             } else {
                 return None;
             }
         }
-        self.node_dirties
+        self.node_cache
             .get_mut_dirty(&node_id)
             .map(|node| node.get_mut())
     }
@@ -83,13 +83,13 @@ impl<Dev: RawBlockDev + Unpin, Cache: DirtyNodeCache> DirtyNodeManager<Dev, Cach
             .node_allocater
             .allocate()
             .expect("no empty free for node allocate");
-        self.node_dirties.insert(node_id, DirtyNode::from(node));
+        self.node_cache.insert(node_id, DirtyNode::from(node));
         node_id
     }
     // only insert dirty cache
     // not change radix tree
     pub fn insert_del(&mut self, node_id: NodeId) -> Option<DirtyNode> {
-        self.node_dirties.insert(node_id, DirtyNode::Del)
+        self.node_cache.insert(node_id, DirtyNode::Del)
     }
 
     pub fn commit(&mut self) -> (Vec<(NodeId, DirtyNode)>, Vec<NodeId>) {

@@ -7,8 +7,9 @@ pub struct NodeRef {
     // don't own node, just get ref from cache
     pub node_ptr: Weak<Node>,
     pub node_pos: NodePos,
-    // commit_ts don't represent time write to disk,but time when from dsik/new create
-    pub commit_ts: TimeStamp,
+    // start_ts don't represent time write to disk,but time when read from dsik/new create
+    pub start_ts: TimeStamp,
+    pub end_ts: TimeStamp,
 }
 
 pub struct Versions {
@@ -18,34 +19,32 @@ pub struct Versions {
 
 impl Versions {
     pub fn find_node_ref(&self, ts: TimeStamp) -> Option<&NodeRef> {
-        let mut index = self.history.len();
-        for _index in 0..self.history.len() {
-            if self.history[_index].commit_ts <= ts {
-                index = _index;
-            } else {
-                break;
+        for node_ref in self.history.iter() {
+            if node_ref.start_ts <= ts && node_ref.end_ts > ts {
+                return Some(node_ref);
             }
         }
-        if index == self.history.len() {
-            None
-        } else {
-            self.history.get(index)
-        }
+        None
     }
 
     pub fn find_node_mut(&mut self, ts: TimeStamp) -> Option<&mut NodeRef> {
-        let mut index = self.history.len();
-        for _index in 0..self.history.len() {
-            if self.history[_index].commit_ts <= ts {
-                index = _index;
-            } else {
-                break;
+        for node_mut in self.history.iter_mut() {
+            if node_mut.start_ts <= ts && node_mut.end_ts > ts {
+                return Some(node_mut);
             }
         }
-        if index == self.history.len() {
-            None
-        } else {
-            self.history.get_mut(index)
+        None
+    }
+    pub fn try_clear(&mut self, min_ts: TimeStamp) {
+        loop {
+            if let Some(version) = self.history.front() {
+                if version.start_ts < min_ts {
+                    let version = self.history.pop_front().unwrap();
+                    drop(version);
+                    continue;
+                }
+            }
+            break;
         }
     }
 }
