@@ -29,3 +29,9 @@ impl Error for TdbError {
         }
     }
 }
+
+impl From<io::Error> for TdbError {
+    fn from(err:io::Error) -> Self {
+        Self::IoError(err)
+    }
+}
