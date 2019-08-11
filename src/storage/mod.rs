@@ -1,11 +1,13 @@
-mod allocater;
+// mod allocater;
 mod io;
-mod layout;
-mod segement;
+// mod layout;
+// mod segement;
 
-pub use io::{BlockDev, RawBlockDev, G_DEV};
-pub use layout::{BlockDeserialize, BlockId, BlockSerialize, BLOCK_SIZE};
+pub use io::{BlockDev, RawBlockDev};
+// pub use layout::{BlockDeserialize, BlockId, BlockSerialize, BLOCK_SIZE};
 
+pub const BLOCK_SIZE: usize = 4096;
+pub type BlockId = u32;
 
 #[derive(Eq, PartialEq)]
 pub struct ObjectPos {

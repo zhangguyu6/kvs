@@ -1,5 +1,8 @@
 use std::u32;
 
+// extend 1,000,000 every time
+const EXTEND_LIMIT: usize = 1 << 15;
+
 pub trait AsBitBlock: Copy {
     fn bits() -> usize;
     fn all_zero() -> Self;
@@ -73,7 +76,6 @@ impl AsBitBlock for u32 {
 
 pub struct BitMap<B> {
     bit_blocks: Vec<B>,
-    zero_bits: usize,
     all_bits: usize,
 }
 
@@ -86,10 +88,17 @@ impl<B: AsBitBlock> BitMap<B> {
         }
         BitMap {
             bit_blocks: bit_blocks,
-            zero_bits: cap,
             all_bits: cap,
         }
     }
+    pub fn extend(&mut self,extend:usize) -> usize {
+        assert!(extend % B::bits() == 0);
+        let new_len = extend / B::bits() + self.bit_blocks.len();
+        self.bit_blocks.resize(new_len, B::all_zero());
+        self.all_bits += EXTEND_LIMIT * B::bits();
+        self.all_bits
+    }
+
     #[inline]
     pub fn get_bit(&self, index: usize) -> bool {
         if index >= self.all_bits {
@@ -296,6 +305,17 @@ mod tests {
         bitmap.set_bit(64, true);
         assert_eq!(bitmap.get_bit(64), true);
         assert_eq!(bitmap.get_bit(65), false);
+    }
+
+    #[test]
+    fn test_bitmap_extend() {
+        let mut bitmap: BitMap<u32> = BitMap::with_capacity(32);
+        for i in 0..32 {
+            assert_eq!(bitmap.first_zero_with_hint_set(0), Some(i));
+        }
+        assert_eq!(bitmap.count_zeros(), 0);
+        assert_eq!(bitmap.extend(EXTEND_LIMIT), 32 + (1 << 15) * 32);
+        assert_eq!(bitmap.first_zero_with_hint_set(31), Some(32));
     }
 
 }

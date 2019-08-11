@@ -1,7 +1,7 @@
 use std::mem::MaybeUninit;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 
 const FAN_FACTOR: u32 = 16;
 
@@ -29,7 +29,7 @@ impl<T: Default> Default for RadixTree<T> {
 }
 
 impl<T: Default> RadixTree<T> {
-    pub fn get_readlock(&self, node_id: u32) -> Option<RwLockReadGuard<'_, T>> {
+    pub fn get_readlock(&self, node_id: u32) -> Option<RwLockUpgradableReadGuard<'_, T>> {
         let index1 = get_index1(node_id);
         let node2_ptr = self.inner.children[index1].load(Ordering::SeqCst);
         if node2_ptr.is_null() {
@@ -37,7 +37,7 @@ impl<T: Default> RadixTree<T> {
         }
         let index2 = get_index2(node_id);
         let node2_ref = unsafe { node2_ptr.as_ref() }.unwrap();
-        Some(node2_ref.children[index2].read())
+        Some(node2_ref.children[index2].upgradable_read())
     }
     pub fn get_writelock(&self, node_id: u32) -> Option<RwLockWriteGuard<'_, T>> {
         let index1 = get_index1(node_id);

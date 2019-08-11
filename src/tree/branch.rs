@@ -1,19 +1,20 @@
 use super::{Key, MAX_KEY_LEN};
 use crate::error::TdbError;
 use crate::object::{
-    AsObject, ObejctTag, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize,
+    AsObject, ObjectTag, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize,
     UNUSED_OID,
 };
+use crate::storage::BLOCK_SIZE;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
 use std::mem;
 use std::u16;
 
-const MAX_BRANCH_SIZE: usize = 4096;
+const MAX_BRANCH_SIZE: usize = BLOCK_SIZE;
 // key + key len + nodeid
 const MAX_NONSPLIT_BRANCH_SIZE: usize =
-    MAX_BRANCH_SIZE - MAX_KEY_LEN - mem::size_of::<u32>() - mem::size_of::<u16>();
+    MAX_BRANCH_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() - mem::size_of::<u16>();
 
 const REBALANCE_BRANCH_SIZE: usize = MAX_BRANCH_SIZE / 4;
 
@@ -31,7 +32,7 @@ impl Default for Branch {
             children: Vec::with_capacity(0),
             info: ObjectInfo {
                 oid: UNUSED_OID,
-                tag: ObejctTag::Branch,
+                tag: ObjectTag::Branch,
                 size: Branch::get_header_size(),
             },
         }
@@ -57,8 +58,9 @@ impl Branch {
         self.keys.insert(index, key);
         self.children.insert(index + 1, oid);
     }
-    // Split branch size biggher than MAX_NONSPLIT_BRANCH_SIZE
+    // Split branch whuch size biggher than MAX_NONSPLIT_BRANCH_SIZE
     // Branch must be dirty befor split
+    // Return split key and split Branch, solit key is used to insert split Branch in parent
     fn split(&mut self) -> (Key, Self) {
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
@@ -84,7 +86,7 @@ impl Branch {
         (split_key, right_branch)
     }
     // Merge right branch if left < REBALANCE_BRANCH_SIZE and total size <=  MAX_NONSPLIT_BRANCH_SIZE
-    // right_branch should mark del after merge
+    // right_branch should be marked del after merge
     // merge_key is the key of right_branch's first child
     fn merge(&mut self, right_branch: &mut Branch, merge_key: Key) {
         self.info.size += merge_key.len() + mem::size_of::<u16>();
@@ -202,8 +204,8 @@ impl ObjectDeserialize for Branch {
 
 impl AsObject for Branch {
     #[inline]
-    fn get_tag(&self) -> ObejctTag {
-        ObejctTag::Branch
+    fn get_tag(&self) -> ObjectTag {
+        ObjectTag::Branch
     }
     #[inline]
     fn get_ref(obejct_ref: &Object) -> &Self {
