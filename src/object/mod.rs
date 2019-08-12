@@ -1,20 +1,19 @@
-mod object_ref;
 mod object_allocater;
-mod object_table; 
+mod object_ref;
+mod object_table;
 
-pub use object_ref::{ObjectRef,Versions};
+pub use object_ref::{ObjectRef, Versions};
 
 use crate::error::TdbError;
-use crate::tree::{Branch, Leaf,Entry
-};
+use crate::tree::{Branch, Entry, Leaf};
 use std::mem;
-use std::u32;
 use std::sync::Arc;
+use std::u32;
 
 pub const OBJECT_MAX_SIZE: usize = (1 << 24 - 1) as usize;
-pub const UNUSED_OID:u32 = u32::MAX;
+pub const UNUSED_OID: u32 = u32::MAX;
 
-#[derive(PartialEq, Eq,  Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub enum Object {
     L(Leaf),
     B(Branch),
@@ -37,7 +36,7 @@ impl Object {
         T::is(self)
     }
 
-    pub fn read(buf:&[u8],obj_tag:&ObjectTag) -> Result<Self, TdbError> {
+    pub fn read(buf: &[u8], obj_tag: &ObjectTag) -> Result<Self, TdbError> {
         match obj_tag {
             ObjectTag::Leaf => Ok(Object::L(Leaf::deserialize(buf)?)),
             ObjectTag::Branch => Ok(Object::B(Branch::deserialize(buf)?)),
@@ -45,7 +44,7 @@ impl Object {
         }
     }
 
-    pub fn write(&self,buf:&mut [u8]) -> Result<(),TdbError> {
+    pub fn write(&self, buf: &mut [u8]) -> Result<(), TdbError> {
         match self {
             Object::L(leaf) => leaf.serialize(buf),
             Object::B(branch) => branch.serialize(buf),
@@ -56,9 +55,65 @@ impl Object {
 
 pub enum MutObject {
     Readonly(Arc<Object>),
-    Dirty(Object),
-    New(Object),
+    Dirty(Arc<Object>),
+    New(Arc<Object>),
     Del,
+}
+
+impl MutObject {
+    pub fn get_ref(&self) -> Option<&Object> {
+        match self {
+            MutObject::Readonly(obj) => Some(&*obj),
+            MutObject::Dirty(obj) => Some(&*obj),
+            MutObject::New(obj) => Some(&*obj),
+            _ => None,
+        }
+    }
+    pub fn get_mut(&mut self) -> Option<&mut Object> {
+        match self {
+            MutObject::Dirty(obj) => Some(Arc::get_mut(obj).unwrap()),
+            MutObject::New(obj) => Some(Arc::get_mut(obj).unwrap()),
+            _ => None,
+        }
+    }
+    pub fn into_arc(self) -> Option<Arc<Object>> {
+        match self {
+            MutObject::Readonly(obj) => Some(obj.clone()),
+            MutObject::Dirty(obj) => Some(obj.clone()),
+            MutObject::New(obj) => Some(obj.clone()),
+            _ => None,
+        }
+    }
+    pub fn to_dirty(self) -> Self {
+        match self {
+            MutObject::Readonly(obj) => MutObject::Dirty(Arc::new((*obj).clone())),
+            _ => panic!("object is not readonly"),
+        }
+    }
+    pub fn is_dirty(&self) -> bool {
+        match self {
+            MutObject::Dirty(_) => true,
+            _ => false,
+        }
+    }
+    pub fn is_new(&self) -> bool {
+        match self {
+            MutObject::New(_) => true,
+            _ => false,
+        }
+    }
+    pub fn is_del(&self) -> bool {
+        match self {
+            MutObject::Del => true,
+            _ => false,
+        }
+    }
+    pub fn is_readonly(&self) -> bool {
+        match self {
+            MutObject::Readonly(_) => true,
+            _ => false,
+        }
+    }
 }
 
 pub type ObjectId = u32;
@@ -123,9 +178,6 @@ impl Into<u64> for ObjectInfo {
         self.oid as u64 + ((self.tag as u8 as u64) << 32) + ((self.size as u64) << 40)
     }
 }
-
-
-
 
 pub trait ObjectSerialize {
     fn serialize(&self, writer: &mut [u8]) -> Result<(), TdbError>;
@@ -201,5 +253,4 @@ mod tests {
         let val: u64 = obj_info.clone().into();
         assert_eq!(obj_info, ObjectInfo::from(val));
     }
-
 }
