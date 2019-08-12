@@ -5,17 +5,17 @@ mod mut_cache;
 // use crate::tree::Node;
 // use crate::utils::ArcCow;
 
-
 // use std::collections::HashMap;
 // use std::mem;
 
 // thread_local!(pub static LOCAL_CACHE: RefCell<Option<LruCache<NodeId,Arc<Node>>>> = RefCell::new(None));
 // const MAX_LRUCACHE_SIZE: usize = 1 << 16;
 // const MAX_LOCAL_CACHE_SIZE: usize = 512;
-use crate::object::{Object, ObjectId,MutObject};
+use crate::object::{MutObject, Object, ObjectId};
 use crate::transaction::TimeStamp;
 use std::sync::Arc;
-pub trait IndexCache: Send {
+pub trait IndexCache: Send + Clone {
+    fn init(&self);
     fn insert(&self, oid: ObjectId, ts: TimeStamp, arc_node: Arc<Object>);
     fn get(&self, oid: ObjectId, ts: TimeStamp) -> Option<Arc<Object>>;
     fn remove(&self, oid: ObjectId, ts: TimeStamp);
@@ -24,33 +24,13 @@ pub trait IndexCache: Send {
 }
 
 pub trait MutObjectCache {
-    fn insert(&mut self, oid: ObjectId, obj_mut: MutObject) -> Option<MutObject>;
-    fn remove(&mut self, oid: ObjectId) -> Option<MutObject>;
     fn contain(&mut self, oid: ObjectId) -> bool;
+    fn remove(&mut self, oid: ObjectId) -> Option<MutObject>;
+    fn insert(&mut self, oid: ObjectId, obj_mut: MutObject) -> Option<MutObject>;
+    fn get_ref(&mut self, oid: ObjectId) -> Option<&MutObject>;
     fn get_mut(&mut self, oid: ObjectId) -> Option<&mut MutObject>;
-    fn get_mut_dirty(&mut self, oid:ObjectId) -> Option<&mut MutObject>;
     fn drain(&mut self) -> Box<dyn Iterator<Item = (MutObject, MutObject)>>;
 }
-
-
-
-// impl From<Arc<Node>> for DirtyNode {
-//     fn from(arc_node: Arc<Node>) -> Self {
-//         DirtyNode::Readonly(arc_node)
-//     }
-// }
-
-// impl From<Node> for DirtyNode {
-//     fn from(node: Node) -> Self {
-//         DirtyNode::New(node)
-//     }
-// }
-
-// impl Default for DirtyNode {
-//     fn default() -> Self {
-//         Self::Del
-//     }
-// }
 
 // impl Clone for DirtyNode {
 //     fn clone(&self) -> Self {
