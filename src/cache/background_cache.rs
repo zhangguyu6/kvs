@@ -18,24 +18,24 @@ enum ObjectOp {
     Close,
 }
 #[derive(Clone)]
-pub struct BackgroundIndexCacheHandler {
+pub struct BackgroundCache {
     sender: Sender<ObjectOp>,
 }
 
-pub struct BackgroundIndexCacheInner {
+pub struct BackgroundCacheInner {
     lru_cache: LruCache<(ObjectId, TimeStamp), Arc<Object>>,
     receiver: Receiver<ObjectOp>,
 }
 
-impl BackgroundIndexCacheInner {
-    pub fn new(cap: usize) -> BackgroundIndexCacheHandler {
+impl BackgroundCacheInner {
+    pub fn new(cap: usize) -> BackgroundCache {
         let lru_cache = LruCache::new(cap);
         let (sender, receiver) = unbounded();
-        let cache = BackgroundIndexCacheInner {
+        let cache = BackgroundCacheInner {
             lru_cache: lru_cache,
             receiver: receiver,
         };
-        let handler = BackgroundIndexCacheHandler { sender };
+        let handler = BackgroundCache { sender };
         cache.work();
         handler
     }
@@ -70,13 +70,10 @@ impl BackgroundIndexCacheInner {
                 },
             }
         });
-    }
+} 
 }
 
-impl IndexCache for BackgroundIndexCacheHandler {
-    fn init(&self) {
-        
-    }
+impl IndexCache for BackgroundCache {
     fn insert(&self, oid: ObjectId, ts: TimeStamp, arc_node: Arc<Object>) {
         self.sender
             .try_send(ObjectOp::Insert(oid, ts, arc_node))

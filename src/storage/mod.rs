@@ -1,10 +1,10 @@
-// mod allocater;
+mod block_allocater;
 mod io;
 // mod layout;
 // mod segement;
 
 pub use io::{BlockDev, RawBlockDev};
-// pub use layout::{BlockDeserialize, BlockId, BlockSerialize, BLOCK_SIZE};
+pub use block_allocater::BlockAllocater;
 
 pub const BLOCK_SIZE: usize = 4096;
 pub type BlockId = u32;

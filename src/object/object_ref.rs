@@ -22,7 +22,7 @@ impl ObjectRef {
             end_ts: MAX_TS,
         }
     }
-}
+} 
 
 pub struct Versions {
     pub history: VecDeque<ObjectRef>,

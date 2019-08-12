@@ -1,8 +1,12 @@
 mod object_allocater;
 mod object_ref;
 mod object_table;
+mod object_access;
 
+pub use object_allocater::ObjectAllocater;
 pub use object_ref::{ObjectRef, Versions};
+pub use object_table::ObjectTable;
+pub use object_access::ObjectAccess;
 
 use crate::error::TdbError;
 use crate::tree::{Branch, Entry, Leaf};
@@ -61,6 +65,7 @@ pub enum MutObject {
 }
 
 impl MutObject {
+    #[inline]
     pub fn get_ref(&self) -> Option<&Object> {
         match self {
             MutObject::Readonly(obj) => Some(&*obj),
@@ -69,6 +74,7 @@ impl MutObject {
             _ => None,
         }
     }
+    #[inline]
     pub fn get_mut(&mut self) -> Option<&mut Object> {
         match self {
             MutObject::Dirty(obj) => Some(Arc::get_mut(obj).unwrap()),
@@ -76,6 +82,7 @@ impl MutObject {
             _ => None,
         }
     }
+    #[inline]
     pub fn into_arc(self) -> Option<Arc<Object>> {
         match self {
             MutObject::Readonly(obj) => Some(obj.clone()),
@@ -84,30 +91,35 @@ impl MutObject {
             _ => None,
         }
     }
+    #[inline]
     pub fn to_dirty(self) -> Self {
         match self {
             MutObject::Readonly(obj) => MutObject::Dirty(Arc::new((*obj).clone())),
             _ => panic!("object is not readonly"),
         }
     }
+    #[inline]
     pub fn is_dirty(&self) -> bool {
         match self {
             MutObject::Dirty(_) => true,
             _ => false,
         }
     }
+    #[inline]
     pub fn is_new(&self) -> bool {
         match self {
             MutObject::New(_) => true,
             _ => false,
         }
     }
+    #[inline]
     pub fn is_del(&self) -> bool {
         match self {
             MutObject::Del => true,
             _ => false,
         }
     }
+    #[inline]
     pub fn is_readonly(&self) -> bool {
         match self {
             MutObject::Readonly(_) => true,

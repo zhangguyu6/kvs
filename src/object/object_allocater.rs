@@ -20,7 +20,7 @@ impl ObjectAllocater {
             Some(oid as u32)
         } else {
             None
-        }
+        }  
     }
     pub fn free(&mut self, oid: ObjectId) {
         self.bitmap.set_bit(oid as usize, false);
