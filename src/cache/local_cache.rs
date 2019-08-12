@@ -5,39 +5,63 @@ use lru_cache::LruCache;
 use std::cell::RefCell;
 use std::sync::Arc;
 
-pub struct LocalIndexCache {
-    lru_cache: RefCell<LruCache<ObjectId, Arc<Object>>>,
-}
+thread_local!(pub static LOCAL_CACHE: RefCell<Option<LruCache<ObjectId,Arc<Object>>>> = RefCell::new(None));
 
-impl Drop for LocalIndexCache {
+const MAX_CACHE_SIZE: usize = 512;
+
+#[derive(Clone)]
+pub struct LocalNodeCache {}
+
+impl Drop for LocalNodeCache {
     fn drop(&mut self) {
         self.close();
     }
 }
 
-impl LocalIndexCache {
-    pub fn new(cap: usize) -> Self {
-        let lru_cache = RefCell::new(LruCache::new(cap));
-        Self { lru_cache }
+impl IndexCache for LocalNodeCache {
+    fn init(&self) {
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            if let Some(cache_mut) = &mut *cache_mut {
+                cache_mut.clear();
+            } else {
+                *cache_mut = Some(LruCache::new(MAX_CACHE_SIZE));
+            }
+        });
     }
-}
-
-impl IndexCache for LocalIndexCache {
     fn insert(&self, oid: ObjectId, _: TimeStamp, arc_obj: Arc<Object>) {
-        let mut cache_mut = self.lru_cache.borrow_mut();
-        cache_mut.insert(oid, arc_obj);
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+
+            cache_mut.as_mut().unwrap().insert(oid, arc_obj);
+        });
     }
     fn get(&self, oid: ObjectId, _: TimeStamp) -> Option<Arc<Object>> {
-        let mut cache_mut = self.lru_cache.borrow_mut();
-        cache_mut.get_mut(&oid).map(|arc_obj| arc_obj.clone())
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            cache_mut
+                .as_mut()
+                .unwrap()
+                .get_mut(&oid)
+                .map(|node_mut| node_mut.clone())
+        })
     }
     fn remove(&self, oid: ObjectId, _: TimeStamp) {
-        let mut cache_mut = self.lru_cache.borrow_mut();
-        cache_mut.remove(&oid);
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            cache_mut.as_mut().unwrap().remove(&oid);
+        });
     }
     fn clear(&self) {
-        let mut cache_mut = self.lru_cache.borrow_mut();
-        cache_mut.clear();
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            cache_mut.as_mut().unwrap().clear();
+        });
     }
-    fn close(&self) {}
+    fn close(&self) {
+        LOCAL_CACHE.with(|cache| {
+            let mut cache_mut = cache.borrow_mut();
+            *cache_mut = None;
+        });
+    }
 }
