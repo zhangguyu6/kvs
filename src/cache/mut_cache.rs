@@ -8,6 +8,15 @@ pub struct MutObjectCache {
     cache: LruCache<ObjectId, MutObject>,
 }
 
+impl MutObjectCache {
+    pub fn with_capacity(cap:usize) -> Self {
+        Self {
+            dirties:HashMap::new(),
+            cache:LruCache::new(cap)
+        }
+    }
+} 
+
 // Readonly in cache
 // New/Del/Dirty in dirties
 // There is no intersection between the dirties and cache
