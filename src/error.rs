@@ -5,6 +5,7 @@ use std::io;
 #[derive(Debug)]
 pub enum TdbError {
     IoError(io::Error),
+    ExceedMaxCap,
     SerializeError,
     DeserializeError,
     Restart,
