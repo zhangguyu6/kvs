@@ -1,6 +1,7 @@
 use super::IndexCache;
 use crate::object::{Object, ObjectId};
 use crate::transaction::TimeStamp;
+use crate::tree::Entry;
 
 use crossbeam::{
     channel::{unbounded, Receiver, Sender, TryRecvError},
@@ -70,14 +71,16 @@ impl BackgroundCacheInner {
                 },
             }
         });
-} 
+    }
 }
 
 impl IndexCache for BackgroundCache {
-    fn insert(&self, oid: ObjectId, ts: TimeStamp, arc_node: Arc<Object>) {
-        self.sender
-            .try_send(ObjectOp::Insert(oid, ts, arc_node))
-            .expect("send error");
+    fn insert(&self, oid: ObjectId, ts: TimeStamp, arc_obj: Arc<Object>) {
+        if !arc_obj.is::<Entry>() {
+            self.sender
+                .try_send(ObjectOp::Insert(oid, ts, arc_obj))
+                .expect("send error");
+        }
     }
     fn get(&self, oid: ObjectId, ts: TimeStamp) -> Option<Arc<Object>> {
         None
