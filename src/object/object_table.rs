@@ -2,7 +2,6 @@ use super::{Object, ObjectId, ObjectRef, ObjectTag, Versions};
 use crate::storage::{BlockDev, RawBlockDev};
 use crate::transaction::{TimeStamp, GLOBAL_MIN_TS, MAX_TS};
 use crate::utils::RadixTree;
-use parking_lot::RwLockUpgradableReadGuard;
 use std::sync::{atomic::Ordering, Arc};
 
 pub struct ObjectTable {
@@ -12,7 +11,7 @@ pub struct ObjectTable {
 impl ObjectTable {
     pub fn with_capacity(cap: usize) -> Self {
         ObjectTable {
-            tree: RadixTree::default(),
+            tree: RadixTree::with_capacity(cap).unwrap(),
         }
     }
     pub fn get<Dev: RawBlockDev + Unpin>(
@@ -22,20 +21,23 @@ impl ObjectTable {
         dev: &BlockDev<Dev>,
     ) -> Option<Arc<Object>> {
         if let Some(read_versions) = self.tree.get_readlock(oid) {
-            let obj_ref = read_versions.find_obj_ref(ts);
-            if let Some(node_ref) = obj_ref {
+            if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
                 assert!(read_versions.obj_tag.is_some());
-                if let Some(arc_node) = node_ref.obj_ref.upgrade() {
+                if let Some(arc_node) = obj_ref.obj_ref.upgrade() {
                     return Some(arc_node);
                 } else {
-                    let node = dev
-                        .sync_read_node(&node_ref.obj_pos, read_versions.obj_tag.as_ref().unwrap())
-                        .unwrap();
-                    let mut write_versions = RwLockUpgradableReadGuard::upgrade(read_versions);
-                    let arc_node = Arc::new(node);
+                    let pos = obj_ref.obj_pos.clone();
+                    let tag = read_versions.obj_tag.unwrap().clone();
+                    // drop because read from disk may waste many time
+                    drop(read_versions);
+                    let node = dev.sync_read_node(&pos, &tag).unwrap();
+                    let mut write_versions = self.tree.get_writelock(oid).unwrap();
+                    let mut arc_node = Arc::new(node);
                     let obj_mut = write_versions.find_obj_mut(ts).unwrap();
                     if obj_mut.obj_ref.strong_count() == 0 {
                         obj_mut.obj_ref = Arc::downgrade(&arc_node);
+                    } else {
+                        arc_node = obj_mut.obj_ref.upgrade().unwrap();
                     }
                     return Some(arc_node);
                 }
@@ -46,7 +48,7 @@ impl ObjectTable {
 
     // Insert new allocated obj to table
     pub fn add_new(&self, oid: ObjectId, version: ObjectRef, obj_tag: ObjectTag) {
-        let mut new_versions = self.tree.get_or_touchwritelock(oid as u32);
+        let mut new_versions = self.tree.get_writelock(oid as u32).unwrap();
         assert!(new_versions.history.is_empty());
         assert!(new_versions.obj_tag.is_none());
         new_versions.add(version, obj_tag);
@@ -105,5 +107,11 @@ impl ObjectTable {
             }
             Err(oid)
         }
+    }
+
+    pub fn extend(&self, extend: usize) {
+        self.tree
+            .extend(extend)
+            .expect("object table is not space to allocate");
     }
 }
