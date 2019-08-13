@@ -191,3 +191,29 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         self.poll_write(obj_pos.block_start, buf).await
     }
 }
+
+pub struct Dummy {}
+impl RawBlockDev for Dummy {
+    fn read(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError> {
+        unimplemented!()
+    }
+    fn write(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError> {
+        unimplemented!()
+    }
+    fn async_read<F: FnOnce()>(
+        &self,
+        block_start: u32,
+        buf: &mut [u8],
+        callback: F,
+    ) -> Poll<Result<(), TdbError>> {
+        unimplemented!()
+    }
+    fn async_write<F: FnOnce()>(
+        &self,
+        block_start: u32,
+        buf: &[u8],
+        callback: F,
+    ) -> Poll<Result<(), TdbError>> {
+        unimplemented!()
+    }
+}
