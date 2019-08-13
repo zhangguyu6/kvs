@@ -113,6 +113,13 @@ impl AsObject for Entry {
         }
     }
     #[inline]
+    fn unwrap(obj:Object) -> Self {
+        match obj {
+            Object::E(entry) => entry,
+            _ => panic!("object isn't entry"),
+        }
+    }
+    #[inline]
     fn is(obejct_ref: &Object) -> bool {
         match obejct_ref {
             Object::E(_) => true,

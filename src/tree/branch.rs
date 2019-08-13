@@ -40,7 +40,7 @@ impl Default for Branch {
 }
 impl Branch {
     // Return (object,object index) greater or equal to key
-    fn search<K: Borrow<[u8]>>(&self, key: &K) -> (ObjectId, usize) {
+    pub fn search<K: Borrow<[u8]>>(&self, key: &K) -> (ObjectId, usize) {
         let index = match self
             .keys
             .binary_search_by(|_key| _key.as_slice().cmp(key.borrow()))
@@ -217,6 +217,13 @@ impl AsObject for Branch {
     #[inline]
     fn get_mut(object_mut: &mut Object) -> &mut Self {
         match object_mut {
+            Object::B(branch) => branch,
+            _ => panic!("object isn't branch"),
+        }
+    }
+    #[inline]
+    fn unwrap(obj:Object) -> Self {
+        match obj {
             Object::B(branch) => branch,
             _ => panic!("object isn't branch"),
         }

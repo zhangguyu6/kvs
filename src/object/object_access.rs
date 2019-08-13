@@ -2,6 +2,7 @@ use crate::cache::IndexCache;
 use crate::object::{Object, ObjectId, ObjectTable};
 use crate::storage::{BlockDev, RawBlockDev};
 use crate::transaction::{Context, TimeStamp};
+use crate::tree::Entry;
 use std::sync::Arc;
 
 pub struct ObjectAccess<'a, C: IndexCache, D: RawBlockDev + Unpin> {
@@ -9,6 +10,17 @@ pub struct ObjectAccess<'a, C: IndexCache, D: RawBlockDev + Unpin> {
     cache: &'a C,
     dev: &'a BlockDev<D>,
     obj_table: &'a ObjectTable,
+}
+
+impl<'a, C: IndexCache, D: RawBlockDev + Unpin> Clone for ObjectAccess<'a,C,D> {
+    fn clone(&self) -> Self {
+        Self {
+            ts:self.ts,
+            cache:self.cache,
+            dev:self.dev,
+            obj_table:self.obj_table
+        }
+    }
 }
 
 impl<'a, C: IndexCache, D: RawBlockDev + Unpin> ObjectAccess<'a, C, D> {
@@ -25,7 +37,10 @@ impl<'a, C: IndexCache, D: RawBlockDev + Unpin> ObjectAccess<'a, C, D> {
             Some(obj)
         } else {
             if let Some(obj) = self.obj_table.get(oid, self.ts, self.dev) {
-                self.cache.insert(oid, self.ts, obj.clone());
+                // only cache index node
+                if !obj.is::<Entry>() {
+                    self.cache.insert(oid, self.ts, obj.clone());
+                }
                 Some(obj)
             } else {
                 None

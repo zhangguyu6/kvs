@@ -1,13 +1,14 @@
+mod object_access;
 mod object_allocater;
+mod object_modify;
 mod object_ref;
 mod object_table;
-mod object_access;
-mod object_modify;
 
+pub use object_access::ObjectAccess;
 pub use object_allocater::ObjectAllocater;
+pub use object_modify::ObjectModify;
 pub use object_ref::{ObjectRef, Versions};
 pub use object_table::ObjectTable;
-pub use object_access::ObjectAccess;
 
 use crate::error::TdbError;
 use crate::tree::{Branch, Entry, Leaf};
@@ -15,10 +16,11 @@ use std::mem;
 use std::sync::Arc;
 use std::u32;
 
-pub const OBJECT_MAX_SIZE: usize = (1 << 24 - 1) as usize;
+// Entry less than 2M
+pub const OBJECT_MAX_SIZE: usize = (1 << 21) as usize;
 pub const UNUSED_OID: u32 = u32::MAX;
 
-#[derive(PartialEq, Eq, Clone,Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Object {
     L(Leaf),
     B(Branch),
@@ -35,7 +37,10 @@ impl Object {
     pub fn get_mut<T: AsObject>(&mut self) -> &mut T {
         T::get_mut(self)
     }
-
+    #[inline]
+    pub fn unwrap<T:AsObject>(self) -> T {
+        T::unwrap(self)
+    }
     #[inline]
     pub fn is<T: AsObject>(&self) -> bool {
         T::is(self)
@@ -209,6 +214,7 @@ pub trait AsObject: ObjectDeserialize + ObjectSerialize {
     fn get_header_size() -> usize;
     fn get_size(&self) -> usize;
     fn get_maxsize() -> usize;
+    fn unwrap(obj:Object) ->Self;
 }
 
 #[cfg(test)]

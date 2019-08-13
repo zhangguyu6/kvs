@@ -26,9 +26,6 @@ impl IndexCache for LocalCache {
             if cache_mut.is_none() {
                 *cache_mut = Some(LruCache::new(MAX_CACHE_SIZE));
             }
-            if !arc_obj.is::<Entry>() {
-                cache_mut.as_mut().unwrap().insert((oid, ts), arc_obj);
-            }
         });
     }
     fn get(&self, oid: ObjectId, ts: TimeStamp) -> Option<Arc<Object>> {

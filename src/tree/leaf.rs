@@ -40,13 +40,23 @@ impl Default for Leaf {
 impl Leaf {
     // Search oid corresponding to key
     // Return oid if find else index for insert
-    fn search<K: Borrow<[u8]>>(&self, key: &K) -> Result<ObjectId, usize> {
+    pub fn search<K: Borrow<[u8]>>(&self, key: &K) -> Result<ObjectId, usize> {
         match self
             .entrys
             .binary_search_by(|_key| _key.0.as_slice().cmp(key.borrow()))
         {
             Ok(index) => Ok(self.entrys[index].1),
             Err(index) => Err(index),
+        }
+    }
+
+    pub fn search_index<K: Borrow<[u8]>>(&self, key: &K) -> Option<(ObjectId,usize)> {
+        match self
+            .entrys
+            .binary_search_by(|_key| _key.0.as_slice().cmp(key.borrow()))
+        {
+            Ok(index) => Some((self.entrys[index].1,index)),
+            Err(_) => None,
         }
     }
     // Insert object to non-full leaf, leaf must be dirty before insert
@@ -196,6 +206,13 @@ impl AsObject for Leaf {
     #[inline]
     fn get_mut(object_mut: &mut Object) -> &mut Self {
         match object_mut {
+            Object::L(leaf) => leaf,
+            _ => panic!("object isn't leaf"),
+        }
+    }
+     #[inline]
+    fn unwrap(obj:Object) -> Self {
+        match obj {
             Object::L(leaf) => leaf,
             _ => panic!("object isn't leaf"),
         }
