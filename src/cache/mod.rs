@@ -1,7 +1,7 @@
 mod background_cache;
 mod local_cache;
 mod mut_cache;
-pub use background_cache::BackgroundCache;
+pub use background_cache::{BackgroundCache,BackgroundCacheInner};
 pub use local_cache::LocalCache;
 pub use mut_cache::MutObjectCache;
 
