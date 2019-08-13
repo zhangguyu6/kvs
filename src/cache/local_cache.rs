@@ -26,38 +26,37 @@ impl IndexCache for LocalCache {
             if cache_mut.is_none() {
                 *cache_mut = Some(LruCache::new(MAX_CACHE_SIZE));
             }
-            if arc_obj.is::<Entry>() {
- 
-            cache_mut.as_mut().unwrap().insert((oid,ts), arc_obj);
+            if !arc_obj.is::<Entry>() {
+                cache_mut.as_mut().unwrap().insert((oid, ts), arc_obj);
             }
         });
     }
     fn get(&self, oid: ObjectId, ts: TimeStamp) -> Option<Arc<Object>> {
         LOCAL_CACHE.with(|cache| {
             let mut cache_mut = cache.borrow_mut();
-                        if cache_mut.is_none() {
+            if cache_mut.is_none() {
                 *cache_mut = Some(LruCache::new(MAX_CACHE_SIZE));
             }
             cache_mut
                 .as_mut()
                 .unwrap()
-                .get_mut(&(oid,ts))
+                .get_mut(&(oid, ts))
                 .map(|node_mut| node_mut.clone())
         })
     }
     fn remove(&self, oid: ObjectId, ts: TimeStamp) {
         LOCAL_CACHE.with(|cache| {
             let mut cache_mut = cache.borrow_mut();
-                        if cache_mut.is_none() {
+            if cache_mut.is_none() {
                 *cache_mut = Some(LruCache::new(MAX_CACHE_SIZE));
             }
-            cache_mut.as_mut().unwrap().remove(&(oid,ts));
+            cache_mut.as_mut().unwrap().remove(&(oid, ts));
         });
     }
     fn clear(&self) {
         LOCAL_CACHE.with(|cache| {
             let mut cache_mut = cache.borrow_mut();
-                        if cache_mut.is_none() {
+            if cache_mut.is_none() {
                 *cache_mut = Some(LruCache::new(MAX_CACHE_SIZE));
             }
             cache_mut.as_mut().unwrap().clear();
