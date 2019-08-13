@@ -2,6 +2,7 @@ mod object_allocater;
 mod object_ref;
 mod object_table;
 mod object_access;
+mod object_modify;
 
 pub use object_allocater::ObjectAllocater;
 pub use object_ref::{ObjectRef, Versions};
@@ -17,7 +18,7 @@ use std::u32;
 pub const OBJECT_MAX_SIZE: usize = (1 << 24 - 1) as usize;
 pub const UNUSED_OID: u32 = u32::MAX;
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone,Debug)]
 pub enum Object {
     L(Leaf),
     B(Branch),
