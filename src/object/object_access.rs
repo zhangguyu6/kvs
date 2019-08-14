@@ -6,10 +6,10 @@ use crate::tree::Entry;
 use std::sync::Arc;
 
 pub struct ObjectAccess<'a, C: IndexCache, D: RawBlockDev + Unpin> {
-    ts: TimeStamp,
-    cache: &'a C,
-    dev: &'a BlockDev<D>,
-    obj_table: &'a ObjectTable,
+    pub ts: TimeStamp,
+    pub cache: &'a C,
+    pub dev: &'a BlockDev<D>,
+    pub obj_table: &'a ObjectTable,
 }
 
 impl<'a, C: IndexCache, D: RawBlockDev + Unpin> Clone for ObjectAccess<'a,C,D> {

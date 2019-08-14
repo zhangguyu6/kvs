@@ -17,7 +17,7 @@ const MAX_ENTRY_SIZE: usize = u16::MAX as usize * BLOCK_SIZE;
 pub struct Entry {
     pub key: Key,
     pub val: Val,
-    info: ObjectInfo,
+    pub info: ObjectInfo,
 }
 
 impl Entry {
@@ -33,7 +33,12 @@ impl Entry {
             },
         }
     }
-}
+    pub fn update(&mut self,val:Val) {
+        self.info.size -= self.val.len();
+        self.info.size += val.len();
+        self.val = val;
+    }
+} 
 
 impl Default for Entry {
     fn default() -> Self {
@@ -55,7 +60,7 @@ impl ObjectSerialize for Entry {
         // object info
         writer.write_u64::<LittleEndian>(self.info.clone().into())?;
         // key len
-        writer.write_u32::<LittleEndian>(self.key.len() as u32)?;
+        writer.write_u16::<LittleEndian>(self.key.len() as u16)?;
         // key
         writer.write(&self.key)?;
         // val len
@@ -72,7 +77,7 @@ impl ObjectDeserialize for Entry {
         // object info
         let object_info = ObjectInfo::from(reader.read_u64::<LittleEndian>()?);
         // key len
-        let key_len: usize = reader.read_u32::<LittleEndian>()?.try_into().unwrap();
+        let key_len: usize = reader.read_u16::<LittleEndian>()?.try_into().unwrap();
         // key
         let mut key = vec![0; key_len];
         reader.read_exact(&mut key)?;
@@ -122,14 +127,18 @@ impl AsObject for Entry {
             _ => false,
         }
     }
-    #[inline]
+    #[inline]  
     fn get_object_info(&self) -> &ObjectInfo {
         &self.info
+    }
+        #[inline]
+    fn get_object_info_mut(&mut self) -> &mut ObjectInfo {
+        &mut self.info
     }
     #[inline]
     fn get_header_size() -> usize {
         // object_info + key len + val len
-        ObjectInfo::static_size() + mem::size_of::<u32>() + mem::size_of::<u32>()
+        ObjectInfo::static_size() + mem::size_of::<u16>() + mem::size_of::<u32>()
     }
     #[inline]
     fn get_size(&self) -> usize {
@@ -157,6 +166,6 @@ mod tests {
         assert!(entry1.serialize(&mut buf).is_ok());
         let entry11 = Entry::deserialize(&buf).unwrap();
         assert_eq!(entry1, entry11);
-        assert_eq!(entry1.get_size(), 8 + 4 + 4 + 3 + 3);
+        assert_eq!(entry1.get_size(), 8 + 2 + 4 + 3 + 3);
     }
 }

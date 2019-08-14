@@ -104,7 +104,6 @@ pub struct Iter<'a, C: IndexCache, D: RawBlockDev + Unpin, K: Borrow<[u8]>> {
 
 impl<'a, C: IndexCache, D: RawBlockDev + Unpin, K: Borrow<[u8]>> Iter<'a, C, D, K> {
     pub fn next_path(&mut self) {
-        println!("path is {:?}", self.path);
         loop {
             if let Some((_, _, index)) = self.path.pop() {
                 if let Some((_, _obj, _)) = self.path.last() {
@@ -133,7 +132,6 @@ impl<'a, C: IndexCache, D: RawBlockDev + Unpin, K: Borrow<[u8]>> Iter<'a, C, D, 
                 break;
             }
         }
-        println!("path is {:?}", self.path);
         self.entry_index = 0;
         assert!(self.path.is_empty() || self.path.last().unwrap().1.is::<Leaf>());
     }
@@ -247,7 +245,9 @@ mod tests {
         assert_eq!(range.next(), None);
         let low = vec![4];
         let high = vec![5];
-        assert_eq!(tree_reader.range(&low..&high).unwrap().next(), Some(e4));
+        range = tree_reader.range(&low..&high).unwrap();
+        assert_eq!(range.next(), Some(e4.clone()));
+        assert_eq!(range.next(), None);
         cache.close();
     }
 }

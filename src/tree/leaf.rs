@@ -1,10 +1,10 @@
 use super::{Key, MAX_KEY_LEN};
 use crate::error::TdbError;
-use crate::storage::BLOCK_SIZE;
 use crate::object::{
-    AsObject, ObjectTag, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize,
+    AsObject, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize, ObjectTag,
     UNUSED_OID,
 };
+use crate::storage::BLOCK_SIZE;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
@@ -210,8 +210,8 @@ impl AsObject for Leaf {
             _ => panic!("object isn't leaf"),
         }
     }
-     #[inline]
-    fn unwrap(obj:Object) -> Self {
+    #[inline]
+    fn unwrap(obj: Object) -> Self {
         match obj {
             Object::L(leaf) => leaf,
             _ => panic!("object isn't leaf"),
@@ -227,6 +227,10 @@ impl AsObject for Leaf {
     #[inline]
     fn get_object_info(&self) -> &ObjectInfo {
         &self.info
+    }
+    #[inline]
+    fn get_object_info_mut(&mut self) -> &mut ObjectInfo {
+        &mut self.info
     }
     #[inline]
     fn get_header_size() -> usize {

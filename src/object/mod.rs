@@ -45,7 +45,15 @@ impl Object {
     pub fn is<T: AsObject>(&self) -> bool {
         T::is(self)
     }
-
+    #[inline] 
+    pub fn get_object_info_mut(&mut self) ->&mut ObjectInfo {
+        match self {
+            Object::L(leaf) => leaf.get_object_info_mut(),
+            Object::B(branch) => branch.get_object_info_mut(),
+            Object::E(entry) => entry.get_object_info_mut()
+        }
+    }
+    #[inline]
     pub fn read(buf: &[u8], obj_tag: &ObjectTag) -> Result<Self, TdbError> {
         match obj_tag {
             ObjectTag::Leaf => Ok(Object::L(Leaf::deserialize(buf)?)),
@@ -53,7 +61,7 @@ impl Object {
             ObjectTag::Entry => Ok(Object::E(Entry::deserialize(buf)?)),
         }
     }
-
+    #[inline]
     pub fn write(&self, buf: &mut [u8]) -> Result<(), TdbError> {
         match self {
             Object::L(leaf) => leaf.serialize(buf),
@@ -211,6 +219,7 @@ pub trait AsObject: ObjectDeserialize + ObjectSerialize {
     fn get_mut(object_mut: &mut Object) -> &mut Self;
     fn is(obejct_ref: &Object) -> bool;
     fn get_object_info(&self) -> &ObjectInfo;
+    fn get_object_info_mut(&mut self) ->&mut ObjectInfo;
     fn get_header_size() -> usize;
     fn get_size(&self) -> usize;
     fn get_maxsize() -> usize;

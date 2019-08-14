@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 const DEFAULT_OBJECT_EXTEND_NUM: usize = 1 << 16;
 
+
 pub struct ObjectModify<'a, C: MutCache, D: RawBlockDev + Unpin> {
     ts: TimeStamp,
     dev: &'a BlockDev<D>,
@@ -67,7 +68,7 @@ impl<'a, C: MutCache, D: RawBlockDev + Unpin> ObjectModify<'a, C, D> {
     }
 
     // Insert New object to dirty cache and Return allocated oid
-    pub fn insert(&mut self, obj: Object) -> ObjectId {
+    pub fn insert(&mut self, mut obj: Object) -> ObjectId {
         let oid = match self.obj_allocater.allocate() {
             Some(oid) => oid,
             None => {
@@ -76,6 +77,7 @@ impl<'a, C: MutCache, D: RawBlockDev + Unpin> ObjectModify<'a, C, D> {
                 self.obj_allocater.allocate().unwrap()
             }
         };
+        obj.get_object_info_mut().oid = oid;
         let result = self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));
         assert!(result.is_none());
         oid

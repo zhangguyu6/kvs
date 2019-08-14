@@ -1,7 +1,7 @@
 use super::{Key, MAX_KEY_LEN};
 use crate::error::TdbError;
 use crate::object::{
-    AsObject, ObjectTag, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize,
+    AsObject, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize, ObjectTag,
     UNUSED_OID,
 };
 use crate::storage::BLOCK_SIZE;
@@ -20,9 +20,9 @@ const REBALANCE_BRANCH_SIZE: usize = MAX_BRANCH_SIZE / 4;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Branch {
-    keys: Vec<Key>,
-    children: Vec<ObjectId>,
-    info: ObjectInfo,
+    pub keys: Vec<Key>,
+    pub children: Vec<ObjectId>,
+    pub info: ObjectInfo,
 }
 
 impl Default for Branch {
@@ -39,6 +39,19 @@ impl Default for Branch {
     }
 }
 impl Branch {
+
+    pub fn new(key:Key,oid0:ObjectId,oid1:ObjectId) -> Self {
+        let size  = Branch::get_header_size() +  key.len() + mem::size_of::<u16>() + 2 * mem::size_of::<ObjectId>();
+        Self {
+            keys:vec![key],
+            children:vec![oid0,oid1],
+            info:ObjectInfo {
+                oid:UNUSED_OID,
+                tag:ObjectTag::Branch,
+                size:size
+            }
+        }
+    }
     // Return (object,object index) greater or equal to key
     pub fn search<K: Borrow<[u8]>>(&self, key: &K) -> (ObjectId, usize) {
         let index = match self
@@ -51,7 +64,7 @@ impl Branch {
         (self.children[index], index)
     }
     // Insert object to non-full branch, branch must be dirty before insert
-    fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
+    pub fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
         // don't use this function for root insert
         assert!(!self.children.is_empty());
         self.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
@@ -61,7 +74,7 @@ impl Branch {
     // Split branch whuch size biggher than MAX_NONSPLIT_BRANCH_SIZE
     // Branch must be dirty befor split
     // Return split key and split Branch, solit key is used to insert split Branch in parent
-    fn split(&mut self) -> (Key, Self) {
+    pub fn split(&mut self) -> (Key, Self) {
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
         for i in 0..self.keys.len() {
@@ -222,7 +235,7 @@ impl AsObject for Branch {
         }
     }
     #[inline]
-    fn unwrap(obj:Object) -> Self {
+    fn unwrap(obj: Object) -> Self {
         match obj {
             Object::B(branch) => branch,
             _ => panic!("object isn't branch"),
@@ -238,6 +251,10 @@ impl AsObject for Branch {
     #[inline]
     fn get_object_info(&self) -> &ObjectInfo {
         &self.info
+    }
+    #[inline]
+    fn get_object_info_mut(&mut self) -> &mut ObjectInfo {
+        &mut self.info
     }
     #[inline]
     fn get_header_size() -> usize {
