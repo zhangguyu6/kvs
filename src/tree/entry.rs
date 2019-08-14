@@ -1,7 +1,7 @@
 use super::{Key, Val};
 use crate::error::TdbError;
 use crate::object::{
-    AsObject, ObjectTag, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize,
+    AsObject, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize, ObjectTag,
     UNUSED_OID,
 };
 use crate::storage::BLOCK_SIZE;
@@ -22,11 +22,7 @@ pub struct Entry {
 
 impl Entry {
     pub fn new(key: Key, val: Val, oid: ObjectId) -> Self {
-        let size = Self::get_header_size()
-            + mem::size_of::<u32>()
-            + key.len()
-            + mem::size_of::<u32>()
-            + val.len();
+        let size = Self::get_header_size() + key.len() + val.len();
         Self {
             key: key,
             val: val,
@@ -113,7 +109,7 @@ impl AsObject for Entry {
         }
     }
     #[inline]
-    fn unwrap(obj:Object) -> Self {
+    fn unwrap(obj: Object) -> Self {
         match obj {
             Object::E(entry) => entry,
             _ => panic!("object isn't entry"),
@@ -161,5 +157,6 @@ mod tests {
         assert!(entry1.serialize(&mut buf).is_ok());
         let entry11 = Entry::deserialize(&buf).unwrap();
         assert_eq!(entry1, entry11);
+        assert_eq!(entry1.get_size(), 8 + 4 + 4 + 3 + 3);
     }
 }
