@@ -20,8 +20,8 @@ const REBALANCE_LEAF_SIZE: usize = MAX_LEAF_SIZE / 4;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Leaf {
-    entrys: Vec<(Key, ObjectId)>,
-    info: ObjectInfo,
+    pub entrys: Vec<(Key, ObjectId)>,
+    pub info: ObjectInfo,
 }
 
 impl Default for Leaf {
@@ -50,24 +50,24 @@ impl Leaf {
         }
     }
 
-    pub fn search_index<K: Borrow<[u8]>>(&self, key: &K) -> Option<(ObjectId,usize)> {
+    pub fn search_index<K: Borrow<[u8]>>(&self, key: &K) -> usize {
         match self
             .entrys
             .binary_search_by(|_key| _key.0.as_slice().cmp(key.borrow()))
         {
-            Ok(index) => Some((self.entrys[index].1,index)),
-            Err(_) => None,
+            Ok(index) => index,
+            Err(index) => index,
         }
     }
     // Insert object to non-full leaf, leaf must be dirty before insert
-    fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
+    pub fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
         self.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
         self.entrys.insert(index, (key, oid));
     }
     // Split leaf which size bigger than MAX_NONSPLIT_LEAF_SIZE
     // Leaf must be dirty befor split
     // Return split key and split Leaf, solit key is used to insert split Leaf in parent
-    fn split(&mut self) -> (Key, Self) {
+    pub fn split(&mut self) -> (Key, Self) {
         assert!(self.info.size > MAX_NONSPLIT_LEAF_SIZE);
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
@@ -92,7 +92,7 @@ impl Leaf {
     }
     // Merge right leaf if left < REBALANCE_LEAF_SIZE and total size <= MAX_NONSPLIT_LEAF_SIZE
     // right leaf should be marked del after merge
-    fn merge(&mut self, right_leaf: &mut Leaf) {
+    pub fn merge(&mut self, right_leaf: &mut Leaf) {
         for entry in right_leaf.entrys.iter() {
             self.entrys.push(entry.clone());
         }
@@ -101,7 +101,7 @@ impl Leaf {
     // Rebalance left and right leaf if left < REBALANCE_LEAF_SIZE and total size > MAX_NONSPLIT_LEAF_SIZE
     // All two left must be dirty
     // return mid key as new key in parrent branch
-    fn rebalance(&mut self, rihgt_leaf: &mut Leaf) -> Key {
+    pub fn rebalance(&mut self, rihgt_leaf: &mut Leaf) -> Key {
         self.entrys.append(&mut rihgt_leaf.entrys);
         self.info.size += rihgt_leaf.info.size - Leaf::get_header_size();
         let mut split_index = 0;
@@ -122,27 +122,27 @@ impl Leaf {
         rihgt_leaf.entrys[0].0.clone()
     }
     #[inline]
-    fn should_split(&self) -> bool {
+    pub fn should_split(&self) -> bool {
         self.info.size > MAX_NONSPLIT_LEAF_SIZE
     }
     #[inline]
-    fn should_rebalance_merge(&self) -> bool {
+    pub fn should_rebalance_merge(&self) -> bool {
         self.info.size < REBALANCE_LEAF_SIZE
     }
     #[inline]
-    fn should_merge(left_branch: &Leaf, right_branch: &Leaf) -> bool {
+    pub fn should_merge(left_branch: &Leaf, right_branch: &Leaf) -> bool {
         left_branch.info.size < REBALANCE_LEAF_SIZE
             && left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
                 <= MAX_NONSPLIT_LEAF_SIZE
     }
     #[inline]
-    fn should_rebalance(left_branch: &Leaf, right_branch: &Leaf) -> bool {
+    pub fn should_rebalance(left_branch: &Leaf, right_branch: &Leaf) -> bool {
         left_branch.info.size < REBALANCE_LEAF_SIZE
             && left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
                 > MAX_NONSPLIT_LEAF_SIZE
     }
     #[inline]
-    fn get_key(&self) -> &Key {
+    pub fn get_key(&self) -> &Key {
         &self.entrys[0].0
     }
 }
