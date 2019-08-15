@@ -43,29 +43,76 @@ impl<'a, C: MutCache, D: RawBlockDev + Unpin> TreeWriter<'a, C, D> {
                             .get_mut::<Leaf>();
                         let insert_index = obj_mut.search(&key).unwrap_err();
                         obj_mut.insert_non_full(insert_index, key, entry_oid);
+                        // split if leaf is full
                         if obj_mut.should_split() {
                             let (split_key, new_leaf) = obj_mut.split();
                             let new_leaf_oid = self.obj_modify.insert(Object::L(new_leaf));
                             // leaf is root
                             if current_oid == self.root_oid {
-                                let branch = Branch::new(split_key,current_oid,new_leaf_oid); 
+                                let branch = Branch::new(split_key, current_oid, new_leaf_oid);
                                 self.root_oid = self.obj_modify.insert(Object::B(branch));
                             }
                             // insert parent branch
                             else {
-                                let parent_branch = self.obj_modify.get_mut(parent_oid).unwrap().get_mut::<Branch>();
-                                parent_branch.insert_non_full(current_index,split_key,new_leaf_oid);
+                                let parent_branch = self
+                                    .obj_modify
+                                    .get_mut(parent_oid)
+                                    .unwrap()
+                                    .get_mut::<Branch>();
+                                parent_branch.insert_non_full(
+                                    current_index,
+                                    split_key,
+                                    new_leaf_oid,
+                                );
                             }
                         }
                         return Some(entry_oid);
                     }
-                    _ => {
-                        unimplemented!()
+                    Object::B(branch) => {
+                        if branch.should_split() {
+                            let obj_mut = self
+                                .obj_modify
+                                .get_mut(current_oid)
+                                .unwrap()
+                                .get_mut::<Branch>();
+                            let (split_key, new_branch) = obj_mut.split();
+                            let new_branch_oid = self.obj_modify.insert(Object::B(new_branch));
+                            let val_in_left = split_key <= key;
+                            // leaf is root
+                            if current_oid == self.root_oid {
+                                let branch = Branch::new(split_key, current_oid, new_branch_oid);
+                                self.root_oid = self.obj_modify.insert(Object::B(branch));
+                            }
+                            // insert parent branch
+                            else {
+                                let parent_branch = self
+                                    .obj_modify
+                                    .get_mut(parent_oid)
+                                    .unwrap()
+                                    .get_mut::<Branch>();
+                                parent_branch.insert_non_full(
+                                    current_index,
+                                    split_key,
+                                    new_branch_oid,
+                                );
+                            }
+                            // reset current obj
+                            if val_in_left {
+                                current_oid = new_branch_oid;
+                                current_index += 1;
+                            }
+                        }
+                        // find next child
+                        else {
+                            let (oid, index) = branch.search(&key);
+                            parent_oid = current_oid;
+                            current_oid = oid;
+                            current_index = index;
+                        }
                     }
                 }
             }
         }
-        unimplemented!()
     }
 
     pub fn remove<K: Borrow<[u8]>>(&mut self, key: &K) -> Option<ObjectId> {
