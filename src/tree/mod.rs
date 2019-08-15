@@ -6,8 +6,9 @@ mod tree_writer;
 pub use branch::Branch;
 pub use entry::Entry;
 pub use leaf::Leaf;
-// 511 byte
-const MAX_KEY_LEN: usize = 1 << 9 - 1;
+use std::u8;
+// 255 byte
+pub const MAX_KEY_LEN: usize = u8::MAX as usize ;
 
 type Key = Vec<u8>;
 

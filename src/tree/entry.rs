@@ -99,6 +99,11 @@ impl AsObject for Entry {
     fn get_tag(&self) -> ObjectTag {
         ObjectTag::Entry
     }
+
+    #[inline]
+    fn get_key(&self) -> &[u8] {
+        self.key.as_slice()
+    }
     #[inline]
     fn get_ref(obejct_ref: &Object) -> &Self {
         match obejct_ref {

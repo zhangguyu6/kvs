@@ -8,11 +8,11 @@ const DEFAULT_OBJECT_EXTEND_NUM: usize = 1 << 16;
 
 
 pub struct ObjectModify<'a, C: MutCache, D: RawBlockDev + Unpin> {
-    ts: TimeStamp,
-    dev: &'a BlockDev<D>,
-    obj_table: &'a ObjectTable,
-    obj_allocater: &'a mut ObjectAllocater,
-    dirty_cache: &'a mut C,
+    pub ts: TimeStamp,
+    pub dev: &'a BlockDev<D>,
+    pub obj_table: &'a ObjectTable,
+    pub obj_allocater: &'a mut ObjectAllocater,
+    pub dirty_cache: &'a mut C,
 }
 
 impl<'a, C: MutCache, D: RawBlockDev + Unpin> ObjectModify<'a, C, D> {

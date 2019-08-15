@@ -39,17 +39,19 @@ impl Default for Branch {
     }
 }
 impl Branch {
-
-    pub fn new(key:Key,oid0:ObjectId,oid1:ObjectId) -> Self {
-        let size  = Branch::get_header_size() +  key.len() + mem::size_of::<u16>() + 2 * mem::size_of::<ObjectId>();
+    pub fn new(key: Key, oid0: ObjectId, oid1: ObjectId) -> Self {
+        let size = Branch::get_header_size()
+            + key.len()
+            + mem::size_of::<u16>()
+            + 2 * mem::size_of::<ObjectId>();
         Self {
-            keys:vec![key],
-            children:vec![oid0,oid1],
-            info:ObjectInfo {
-                oid:UNUSED_OID,
-                tag:ObjectTag::Branch,
-                size:size
-            }
+            keys: vec![key],
+            children: vec![oid0, oid1],
+            info: ObjectInfo {
+                oid: UNUSED_OID,
+                tag: ObjectTag::Branch,
+                size: size,
+            },
         }
     }
     // Return (object,object index) greater or equal to key
@@ -62,6 +64,17 @@ impl Branch {
             Err(index) => index,
         };
         (self.children[index], index)
+    }
+    // Remove key at index and oid at index+1
+    pub fn remove_index(&mut self, index: usize) -> (Key, ObjectId) {
+        let key = self.keys.remove(index);
+        let oid = self.children.remove(index + 1);
+        self.info.size -= key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+        (key, oid)
+    }
+    pub fn update_key(&mut self, index: usize, key: Key) {
+        self.info.size = self.info.size - self.keys[index].len() + key.len();
+        self.keys[index] = key;
     }
     // Insert object to non-full branch, branch must be dirty before insert
     pub fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
@@ -101,7 +114,7 @@ impl Branch {
     // Merge right branch if left < REBALANCE_BRANCH_SIZE and total size <=  MAX_NONSPLIT_BRANCH_SIZE
     // right_branch should be marked del after merge
     // merge_key is the key of right_branch's first child
-    fn merge(&mut self, right_branch: &mut Branch, merge_key: Key) {
+    pub fn merge(&mut self, right_branch: &mut Branch, merge_key: Key) {
         self.info.size += merge_key.len() + mem::size_of::<u16>();
         self.keys.push(merge_key);
         self.keys.append(&mut right_branch.keys);
@@ -110,9 +123,9 @@ impl Branch {
     }
     // Rebalance left and right branch if left < REBALANCE_BRANCH_SIZE and total size > MAX_NONSPLIT_BRANCH_SIZE
     // All two branch must be dirty
-    // rebalance_key s the key of right_branch's first child
+    // rebalance_key is the key of right_branch's first child
     // return remove key as new key in parrent branch
-    fn rebalance(&mut self, right_branch: &mut Branch, rebalance_key: Key) -> Key {
+    pub fn rebalance(&mut self, right_branch: &mut Branch, rebalance_key: Key) -> Key {
         self.info.size += rebalance_key.len() + mem::size_of::<u16>();
         self.keys.push(rebalance_key);
         self.keys.append(&mut right_branch.keys);
@@ -135,27 +148,25 @@ impl Branch {
         remove_key
     }
     #[inline]
-    fn should_split(&self) -> bool {
+    pub fn should_split(&self) -> bool {
         self.info.size > MAX_NONSPLIT_BRANCH_SIZE
     }
     #[inline]
-    fn should_rebalance_merge(&self) -> bool {
+    pub fn should_rebalance_merge(&self) -> bool {
         self.info.size < REBALANCE_BRANCH_SIZE
     }
     #[inline]
-    fn should_merge(left_branch: &Branch, right_branch: &Branch) -> bool {
-        left_branch.info.size < REBALANCE_BRANCH_SIZE
-            && left_branch.info.size + right_branch.info.size - Branch::get_header_size()
+    pub fn should_merge(left_branch: &Branch, right_branch: &Branch) -> bool {
+        left_branch.info.size + right_branch.info.size - Branch::get_header_size()
                 <= MAX_NONSPLIT_BRANCH_SIZE
     }
     #[inline]
-    fn should_rebalance(left_branch: &Branch, right_branch: &Branch) -> bool {
-        left_branch.info.size < REBALANCE_BRANCH_SIZE
-            && left_branch.info.size + right_branch.info.size - Branch::get_header_size()
+    pub fn should_rebalance(left_branch: &Branch, right_branch: &Branch) -> bool {
+        left_branch.info.size + right_branch.info.size - Branch::get_header_size()
                 > MAX_NONSPLIT_BRANCH_SIZE
     }
     #[inline]
-    fn get_key(&self) -> &Key {
+    pub fn get_key(&self) -> &Key {
         &self.keys[0]
     }
 }
@@ -219,6 +230,10 @@ impl AsObject for Branch {
     #[inline]
     fn get_tag(&self) -> ObjectTag {
         ObjectTag::Branch
+    }
+    #[inline]
+    fn get_key(&self) -> &[u8] {
+        self.keys[0].as_slice()
     }
     #[inline]
     fn get_ref(obejct_ref: &Object) -> &Self {

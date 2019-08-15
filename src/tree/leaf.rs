@@ -49,7 +49,8 @@ impl Leaf {
             Err(index) => Err(index),
         }
     }
-
+    // Search obj corresponding to key
+    // Return index
     pub fn search_index<K: Borrow<[u8]>>(&self, key: &K) -> usize {
         match self
             .entrys
@@ -64,6 +65,23 @@ impl Leaf {
         self.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
         self.entrys.insert(index, (key, oid));
     }
+
+    // Remove obj corresponding to key
+    pub fn remove<K: Borrow<[u8]>>(&mut self, key: &K) -> Option<(Key, ObjectId)> {
+        match self
+            .entrys
+            .binary_search_by(|_key| _key.0.as_slice().cmp(key.borrow()))
+        {
+            Ok(index) => {
+                // println!("{:?} {:?} ", self, key.borrow());
+                self.info.size -=
+                    key.borrow().len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+                Some(self.entrys.remove(index))
+            }
+            Err(_) => None,
+        }
+    }
+
     // Split leaf which size bigger than MAX_NONSPLIT_LEAF_SIZE
     // Leaf must be dirty befor split
     // Return split key and split Leaf, solit key is used to insert split Leaf in parent
@@ -101,9 +119,9 @@ impl Leaf {
     // Rebalance left and right leaf if left < REBALANCE_LEAF_SIZE and total size > MAX_NONSPLIT_LEAF_SIZE
     // All two left must be dirty
     // return mid key as new key in parrent branch
-    pub fn rebalance(&mut self, rihgt_leaf: &mut Leaf) -> Key {
-        self.entrys.append(&mut rihgt_leaf.entrys);
-        self.info.size += rihgt_leaf.info.size - Leaf::get_header_size();
+    pub fn rebalance(&mut self, right_leaf: &mut Leaf) -> Key {
+        self.entrys.append(&mut right_leaf.entrys);
+        self.info.size += right_leaf.info.size - Leaf::get_header_size();
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
         for i in 0..self.entrys.len() {
@@ -116,10 +134,10 @@ impl Leaf {
                 break;
             }
         }
-        rihgt_leaf.entrys = self.entrys.split_off(split_index);
-        rihgt_leaf.info.size = self.info.size - left_size + Self::get_header_size();
+        right_leaf.entrys = self.entrys.split_off(split_index);
+        right_leaf.info.size = self.info.size - left_size + Self::get_header_size();
         self.info.size = left_size;
-        rihgt_leaf.entrys[0].0.clone()
+        right_leaf.entrys[0].0.clone()
     }
     #[inline]
     pub fn should_split(&self) -> bool {
@@ -131,14 +149,12 @@ impl Leaf {
     }
     #[inline]
     pub fn should_merge(left_branch: &Leaf, right_branch: &Leaf) -> bool {
-        left_branch.info.size < REBALANCE_LEAF_SIZE
-            && left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
+        left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
                 <= MAX_NONSPLIT_LEAF_SIZE
     }
     #[inline]
     pub fn should_rebalance(left_branch: &Leaf, right_branch: &Leaf) -> bool {
-        left_branch.info.size < REBALANCE_LEAF_SIZE
-            && left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
+        left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
                 > MAX_NONSPLIT_LEAF_SIZE
     }
     #[inline]
@@ -195,6 +211,10 @@ impl AsObject for Leaf {
     #[inline]
     fn get_tag(&self) -> ObjectTag {
         ObjectTag::Leaf
+    }
+    #[inline]
+    fn get_key(&self) -> &[u8] {
+        self.entrys[0].0.as_slice()
     }
     #[inline]
     fn get_ref(obejct_ref: &Object) -> &Self {
@@ -304,6 +324,11 @@ mod tests {
         let key = leaf0.rebalance(&mut leaf1);
         assert_eq!(key, vec![44; 40]);
         assert_eq!(leaf0.get_size(), 8 + 2 + 44 * 46);
+    }
+
+    #[test]
+    fn test_should() {
+
     }
 
 }
