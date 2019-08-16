@@ -3,13 +3,13 @@ mod io;
 // mod layout;
 // mod segement;
 
-pub use io::{BlockDev, RawBlockDev,Dummy};
 pub use block_allocater::BlockAllocater;
+pub use io::{BlockDev, Dummy, RawBlockDev};
 
 pub const BLOCK_SIZE: usize = 4096;
 pub type BlockId = u32;
 
-#[derive(Eq, PartialEq,Clone)]
+#[derive(Eq, PartialEq, Clone)]
 pub struct ObjectPos {
     pub block_start: BlockId,
     pub block_len: u16,
@@ -19,9 +19,15 @@ pub struct ObjectPos {
 impl Default for ObjectPos {
     fn default() -> Self {
         Self {
-            block_start:0,
-            block_len:0,
-            offset:0
+            block_start: 0,
+            block_len: 0,
+            offset: 0,
         }
+    }
+}
+
+impl ObjectPos {
+    pub fn is_empty(&self) -> bool {
+        self.block_start == 0 && self.block_len == 0 && self.offset == 0
     }
 }

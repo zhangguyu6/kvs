@@ -114,6 +114,8 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         assert_eq!(buf.len() % BLOCK_SIZE, 0);
         self.dev.write(block_start, buf)
     }
+
+
     fn poll_write<'a>(&'a self, block_start: u32, buf: &'a [u8]) -> BlockWriter<'a, Dev> {
         assert_eq!(buf.len() % BLOCK_SIZE, 0);
         BlockWriter {

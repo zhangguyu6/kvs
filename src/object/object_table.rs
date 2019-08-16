@@ -1,8 +1,9 @@
-use super::{Object, ObjectId, ObjectRef, ObjectTag, Versions};
+use super::{Object, ObjectId, ObjectRef, Versions};
+use crate::error::TdbError;
 use crate::storage::{BlockDev, RawBlockDev};
-use crate::transaction::{TimeStamp, GLOBAL_MIN_TS, MAX_TS};
+use crate::transaction::TimeStamp;
 use crate::utils::RadixTree;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 
 pub struct ObjectTable {
     tree: RadixTree<Versions>,
@@ -22,12 +23,11 @@ impl ObjectTable {
     ) -> Option<Arc<Object>> {
         if let Some(read_versions) = self.tree.get_readlock(oid) {
             if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
-                assert!(read_versions.obj_tag.is_some());
                 if let Some(arc_node) = obj_ref.obj_ref.upgrade() {
                     return Some(arc_node);
                 } else {
                     let pos = obj_ref.obj_pos.clone();
-                    let tag = read_versions.obj_tag.unwrap().clone();
+                    let tag = obj_ref.obj_info.tag.clone();
                     // drop because read from disk may waste many time
                     drop(read_versions);
                     let node = dev.sync_read_node(&pos, &tag).unwrap();
@@ -46,25 +46,18 @@ impl ObjectTable {
         None
     }
 
-    // Insert new allocated obj to table
-    pub fn add_new(&self, oid: ObjectId, version: ObjectRef, obj_tag: ObjectTag) {
-        let mut new_versions = self.tree.get_writelock(oid as u32).unwrap();
-        assert!(new_versions.history.is_empty());
-        assert!(new_versions.obj_tag.is_none());
-        new_versions.add(version, obj_tag);
-    }
-
     // Return Ok if no need to gc, Err(oid) for next gc
-    pub fn append(
+    pub fn insert(
         &self,
         oid: ObjectId,
         version: ObjectRef,
-        obj_tag: ObjectTag,
+        min_ts: TimeStamp,
     ) -> Result<(), ObjectId> {
         let mut versions = self.tree.get_writelock(oid).unwrap();
-        let min_ts = GLOBAL_MIN_TS.load(Ordering::SeqCst);
-        versions.try_clear(min_ts);
-        versions.add(version, obj_tag);
+        if !versions.history.is_empty() {
+            versions.try_clear(min_ts);
+        }
+        versions.add(version);
         if versions.history.len() == 1 {
             Ok(())
         } else {
@@ -75,14 +68,11 @@ impl ObjectTable {
     // Remove node from radixtree
     // if versions is empty ,free and return None,
     // else return None and try remove next time
-    pub fn remove(&self, oid: ObjectId, ts: TimeStamp) -> Result<(), ObjectId> {
+    pub fn remove(&self, oid: ObjectId, ts: TimeStamp, min_ts: TimeStamp) -> Result<(), ObjectId> {
         let mut versions = self.tree.get_writelock(oid).unwrap();
-        versions.remove(ts);
-        let min_ts = GLOBAL_MIN_TS.load(Ordering::SeqCst);
+        versions.obsolete_newest(min_ts);
         versions.try_clear(min_ts);
         if versions.history.len() == 0 {
-            versions.history.shrink_to_fit();
-            versions.obj_tag = None;
             Ok(())
         } else {
             Err(oid)
@@ -90,28 +80,18 @@ impl ObjectTable {
     }
 
     // Try to clean Object after insert and remove
-    // Return Ok if Object is clean or update else Err(objectid)
+    // Return Ok() if Object is clean  else Err(oid)
     pub fn try_gc(&self, oid: ObjectId, min_ts: TimeStamp) -> Result<(), ObjectId> {
         let mut versions = self.tree.get_writelock(oid).unwrap();
         versions.try_clear(min_ts);
         if versions.history.len() == 0 {
-            versions.history.shrink_to_fit();
-            versions.obj_tag = None;
             Ok(())
         } else {
-            if let Some(obj_ref) = versions.history.front_mut() {
-                // obj has be update
-                if obj_ref.end_ts == MAX_TS {
-                    return Ok(());
-                }
-            }
             Err(oid)
         }
     }
 
-    pub fn extend(&self, extend: usize) {
-        self.tree
-            .extend(extend)
-            .expect("object table is not space to allocate");
+    pub fn extend(&self, extend: usize) -> Result<usize, TdbError> {
+        self.tree.extend(extend)
     }
 }

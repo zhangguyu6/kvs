@@ -54,7 +54,7 @@ impl Object {
         T::is(self)
     }
     #[inline]
-    pub fn get_object_info_ref(&self) -> &ObjectInfo {
+    pub fn get_object_info(&self) -> &ObjectInfo {
         match self {
             Object::L(leaf) => leaf.get_object_info(),
             Object::B(branch) => branch.get_object_info(),
