@@ -595,5 +595,6 @@ mod tests {
                 assert_eq!(tree_writer.get(&key), None);
             }
         }
+        println!("{:?}",tree_writer.root_oid);
     }
 }
