@@ -1,11 +1,10 @@
 use crate::cache::MutCache;
 use crate::object::{MutObject, Object, ObjectAllocater, ObjectId, ObjectTable};
-use crate::storage::{BlockAllocater, BlockDev, RawBlockDev};
+use crate::storage::{BlockDev, RawBlockDev};
 use crate::transaction::{Context, TimeStamp};
 use std::sync::Arc;
 
 const DEFAULT_OBJECT_EXTEND_NUM: usize = 1 << 16;
-
 
 pub struct ObjectModify<'a, C: MutCache, D: RawBlockDev + Unpin> {
     pub ts: TimeStamp,
@@ -51,12 +50,21 @@ impl<'a, C: MutCache, D: RawBlockDev + Unpin> ObjectModify<'a, C, D> {
         if let Some(mut_obj) = self.dirty_cache.remove(oid) {
             match mut_obj {
                 // object is del, do nothing
-                MutObject::Del => None,
-                // object is new allcated, just remove it
-                MutObject::New(obj) => Some(obj),
+                MutObject::Del => {
+                    self.dirty_cache.insert(oid, mut_obj);
+                    None
+                }
+                // object is new allcated, just remove it and free oid
+                MutObject::New(obj) => {
+                    // reuse oid
+                    self.obj_allocater.free(oid);
+                    Some(obj)
+                }
                 // object is on disk, insert remove tag
                 MutObject::Readonly(obj) | MutObject::Dirty(obj) => {
+                    // reuse oid
                     self.dirty_cache.insert(oid, MutObject::Del);
+                    self.obj_allocater.free(oid);
                     Some(obj)
                 }
             }
@@ -78,8 +86,14 @@ impl<'a, C: MutCache, D: RawBlockDev + Unpin> ObjectModify<'a, C, D> {
             }
         };
         obj.get_object_info_mut().oid = oid;
-        let result = self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));
-        assert!(result.is_none());
+        if let Some(mut_obj) = self.dirty_cache.remove(oid) {
+            match mut_obj {
+                MutObject::Del | MutObject::Dirty(_) => {self.dirty_cache.insert(oid, MutObject::Dirty(Arc::new(obj)));},
+                _ => { self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));}
+            }
+        } else {
+            self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));
+        }
         oid
     }
 }
@@ -89,7 +103,7 @@ mod tests {
     use super::*;
     use crate::cache::MutObjectCache;
     use crate::object::*;
-    use crate::storage::{Dummy, ObjectPos};
+    use crate::storage::Dummy;
     use crate::tree::Entry;
     #[test]
     fn test_object_modify() {
