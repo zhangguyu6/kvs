@@ -1,4 +1,4 @@
-use super::{Object, ObjectTag};
+use super::{Object, ObjectInfo};
 use crate::storage::ObjectPos;
 use crate::transaction::{TimeStamp, MAX_TS};
 use std::collections::VecDeque;
@@ -8,6 +8,7 @@ pub struct ObjectRef {
     // don't own obj, just get ref from cache
     pub obj_ref: Weak<Object>,
     pub obj_pos: ObjectPos,
+    pub obj_info: ObjectInfo,
     // start_ts don't represent time write to disk, but time when read from dsik/new create
     pub start_ts: TimeStamp,
     pub end_ts: TimeStamp,
@@ -18,15 +19,15 @@ impl ObjectRef {
         Self {
             obj_ref: Arc::downgrade(arc_obj),
             obj_pos: pos,
+            obj_info: arc_obj.get_object_info_ref().clone(),
             start_ts: ts,
             end_ts: MAX_TS,
         }
     }
-} 
+}
 
 pub struct Versions {
     pub history: VecDeque<ObjectRef>,
-    pub obj_tag: Option<ObjectTag>,
 }
 
 impl Versions {
@@ -58,20 +59,21 @@ impl Versions {
             }
             break;
         }
+        self.history.shrink_to_fit();
     }
-    pub fn add(&mut self, obj_ref: ObjectRef, obj_tag: ObjectTag) {
+    pub fn add(&mut self, obj_ref: ObjectRef) {
+        assert!(obj_ref.end_ts == MAX_TS, "insert obsoleted version");
         if self.history.is_empty() {
-            assert!(self.obj_tag.is_none());
-            self.obj_tag = Some(obj_tag);
             self.history.push_back(obj_ref);
         } else {
-            assert_eq!(self.obj_tag, Some(obj_tag));
             let last_obj_ref = self.history.front_mut().unwrap();
             last_obj_ref.end_ts = obj_ref.start_ts;
             self.history.push_front(obj_ref);
         }
     }
-    pub fn remove(&mut self,ts:TimeStamp) {
+
+    // Set newest version's end_ts to ts, make it obsolete
+    pub fn obsolete_newest(&mut self, ts: TimeStamp) {
         if let Some(_version) = self.history.front_mut() {
             if _version.end_ts == MAX_TS {
                 _version.end_ts = ts;
@@ -84,7 +86,6 @@ impl Default for Versions {
     fn default() -> Self {
         Self {
             history: VecDeque::with_capacity(0),
-            obj_tag: None,
         }
     }
 }
