@@ -1,91 +1,97 @@
-use super::{Object, ObjectInfo};
-use crate::storage::ObjectPos;
-use crate::transaction::{TimeStamp, MAX_TS};
-use std::collections::VecDeque;
-use std::sync::{Arc, Weak};
+use super::{Object, ObjectId, ObjectRef, Versions};
+use crate::error::TdbError;
+use crate::storage::{BlockDev, RawBlockDev};
+use crate::transaction::TimeStamp;
+use crate::utils::RadixTree;
+use std::sync::Arc;
 
-pub struct ObjectRef {
-    // don't own obj, just get ref from cache
-    pub obj_ref: Weak<Object>,
-    pub obj_pos: ObjectPos,
-    pub obj_info: ObjectInfo,
-    // start_ts don't represent time write to disk, but time when read from dsik/new create
-    pub start_ts: TimeStamp,
-    pub end_ts: TimeStamp,
+pub struct ObjectTable {
+    tree: RadixTree<Versions>,
 }
 
-impl ObjectRef {
-    pub fn new(arc_obj: &Arc<Object>, pos: ObjectPos, ts: TimeStamp) -> Self {
-        Self {
-            obj_ref: Arc::downgrade(arc_obj),
-            obj_pos: pos,
-            obj_info: arc_obj.get_object_info_ref().clone(),
-            start_ts: ts,
-            end_ts: MAX_TS,
+impl ObjectTable {
+    pub fn with_capacity(cap: usize) -> Self {
+        ObjectTable {
+            tree: RadixTree::with_capacity(cap).unwrap(),
         }
     }
-}
-
-pub struct Versions {
-    pub history: VecDeque<ObjectRef>,
-}
-
-impl Versions {
-    pub fn find_obj_ref(&self, ts: TimeStamp) -> Option<&ObjectRef> {
-        for obj_ref in self.history.iter() {
-            if obj_ref.start_ts <= ts && obj_ref.end_ts > ts {
-                return Some(obj_ref);
-            }
-        }
-        None
-    }
-
-    pub fn find_obj_mut(&mut self, ts: TimeStamp) -> Option<&mut ObjectRef> {
-        for obj_mut in self.history.iter_mut() {
-            if obj_mut.start_ts <= ts && obj_mut.end_ts > ts {
-                return Some(obj_mut);
-            }
-        }
-        None
-    }
-    pub fn try_clear(&mut self, min_ts: TimeStamp) {
-        loop {
-            if let Some(version) = self.history.back() {
-                if version.end_ts <= min_ts {
-                    let version = self.history.pop_back().unwrap();
-                    drop(version);
-                    continue;
+    pub fn get<Dev: RawBlockDev + Unpin>(
+        &self,
+        oid: ObjectId,
+        ts: TimeStamp,
+        dev: &BlockDev<Dev>,
+    ) -> Option<Arc<Object>> {
+        if let Some(read_versions) = self.tree.get_readlock(oid) {
+            if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
+                if let Some(arc_node) = obj_ref.obj_ref.upgrade() {
+                    return Some(arc_node);
+                } else {
+                    let pos = obj_ref.obj_pos.clone();
+                    let tag = obj_ref.obj_info.tag.clone();
+                    // drop because read from disk may waste many time
+                    drop(read_versions);
+                    let node = dev.sync_read_node(&pos, &tag).unwrap();
+                    let mut write_versions = self.tree.get_writelock(oid).unwrap();
+                    let mut arc_node = Arc::new(node);
+                    let obj_mut = write_versions.find_obj_mut(ts).unwrap();
+                    if obj_mut.obj_ref.strong_count() == 0 {
+                        obj_mut.obj_ref = Arc::downgrade(&arc_node);
+                    } else {
+                        arc_node = obj_mut.obj_ref.upgrade().unwrap();
+                    }
+                    return Some(arc_node);
                 }
             }
-            break;
         }
-        self.history.shrink_to_fit();
+        None
     }
-    pub fn add(&mut self, obj_ref: ObjectRef) {
-        assert!(obj_ref.end_ts == MAX_TS, "insert obsoleted version");
-        if self.history.is_empty() {
-            self.history.push_back(obj_ref);
+
+    // Return Ok if no need to gc, Err(oid) for next gc
+    pub fn insert(
+        &self,
+        oid: ObjectId,
+        version: ObjectRef,
+        min_ts: TimeStamp,
+    ) -> Result<(), ObjectId> {
+        let mut versions = self.tree.get_writelock(oid).unwrap();
+        if !versions.history.is_empty() {
+            versions.try_clear(min_ts);
+        }
+        versions.add(version);
+        if versions.history.len() == 1 {
+            Ok(())
         } else {
-            let last_obj_ref = self.history.front_mut().unwrap();
-            last_obj_ref.end_ts = obj_ref.start_ts;
-            self.history.push_front(obj_ref);
+            Err(oid)
         }
     }
 
-    // Set newest version's end_ts to ts, make it obsolete
-    pub fn obsolete_newest(&mut self, ts: TimeStamp) {
-        if let Some(_version) = self.history.front_mut() {
-            if _version.end_ts == MAX_TS {
-                _version.end_ts = ts;
-            }
+    // Remove node from radixtree
+    // if versions is empty ,free and return None,
+    // else return None and try remove next time
+    pub fn remove(&self, oid: ObjectId, ts: TimeStamp, min_ts: TimeStamp) -> Result<(), ObjectId> {
+        let mut versions = self.tree.get_writelock(oid).unwrap();
+        versions.obsolete_newest(min_ts);
+        versions.try_clear(min_ts);
+        if versions.history.len() == 0 {
+            Ok(())
+        } else {
+            Err(oid)
         }
     }
-}
 
-impl Default for Versions {
-    fn default() -> Self {
-        Self {
-            history: VecDeque::with_capacity(0),
+    // Try to clean Object after insert and remove
+    // Return Ok() if Object is clean  else Err(oid)
+    pub fn try_gc(&self, oid: ObjectId, min_ts: TimeStamp) -> Result<(), ObjectId> {
+        let mut versions = self.tree.get_writelock(oid).unwrap();
+        versions.try_clear(min_ts);
+        if versions.history.len() == 0 {
+            Ok(())
+        } else {
+            Err(oid)
         }
+    }
+
+    pub fn extend(&self, extend: usize) -> Result<usize, TdbError> {
+        self.tree.extend(extend)
     }
 }
