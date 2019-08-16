@@ -12,13 +12,13 @@ pub struct ObjectAccess<'a, C: IndexCache, D: RawBlockDev + Unpin> {
     pub obj_table: &'a ObjectTable,
 }
 
-impl<'a, C: IndexCache, D: RawBlockDev + Unpin> Clone for ObjectAccess<'a,C,D> {
+impl<'a, C: IndexCache, D: RawBlockDev + Unpin> Clone for ObjectAccess<'a, C, D> {
     fn clone(&self) -> Self {
         Self {
-            ts:self.ts,
-            cache:self.cache,
-            dev:self.dev,
-            obj_table:self.obj_table
+            ts: self.ts,
+            cache: self.cache,
+            dev: self.dev,
+            obj_table: self.obj_table,
         }
     }
 }
@@ -73,7 +73,7 @@ mod tests {
         let arc_entry = Arc::new(Object::E(Entry::new(vec![1], vec![1], 1)));
         let pos = ObjectPos::default();
         let obj_ref = ObjectRef::new(&arc_entry, pos, 0);
-        obj_table.add_new(1, obj_ref, ObjectTag::Entry);
+        obj_table.insert(1, obj_ref, 0);
         assert_eq!(obj_access.get(1).unwrap(), arc_entry);
         cache.close();
     }
