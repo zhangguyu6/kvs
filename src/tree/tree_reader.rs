@@ -187,19 +187,19 @@ mod tests {
         };
         let e1 = Arc::new(Object::E(Entry::new(vec![1], vec![1], 1)));
         let obj1 = ObjectRef::new(&e1, ObjectPos::default(), 0);
-        obj_table.add_new(1, obj1, ObjectTag::Entry);
+        obj_table.insert(1, obj1, 0);
 
         let e2 = Arc::new(Object::E(Entry::new(vec![2], vec![2], 2)));
         let obj2 = ObjectRef::new(&e2, ObjectPos::default(), 0);
-        obj_table.add_new(2, obj2, ObjectTag::Entry);
+        obj_table.insert(2, obj2, 0);
 
         let e3 = Arc::new(Object::E(Entry::new(vec![3], vec![3], 3)));
         let obj3 = ObjectRef::new(&e3, ObjectPos::default(), 0);
-        obj_table.add_new(3, obj3, ObjectTag::Entry);
+        obj_table.insert(3, obj3, 0);
 
         let e4 = Arc::new(Object::E(Entry::new(vec![4], vec![4], 4)));
         let obj4 = ObjectRef::new(&e4, ObjectPos::default(), 0);
-        obj_table.add_new(4, obj4, ObjectTag::Entry);
+        obj_table.insert(4, obj4, 0);
 
         let mut l1 = Leaf::default();
         l1.info.oid = 5;
@@ -207,7 +207,7 @@ mod tests {
         l1.insert_non_full(1, vec![2], 2);
         let l1 = Arc::new(Object::L(l1));
         let obj5 = ObjectRef::new(&l1, ObjectPos::default(), 0);
-        obj_table.add_new(5, obj5, ObjectTag::Leaf);
+        obj_table.insert(5, obj5, 0);
 
         let mut l2 = Leaf::default();
         l2.info.oid = 6;
@@ -215,7 +215,7 @@ mod tests {
         l2.insert_non_full(1, vec![4], 4);
         let l2 = Arc::new(Object::L(l2));
         let obj6 = ObjectRef::new(&l2, ObjectPos::default(), 0);
-        obj_table.add_new(6, obj6, ObjectTag::Leaf);
+        obj_table.insert(6, obj6, 0);
 
         let mut b1 = Branch::default();
         b1.info.oid = 7;
@@ -224,7 +224,7 @@ mod tests {
         b1.children.push(6);
         let b1 = Arc::new(Object::B(b1));
         let obj7 = ObjectRef::new(&b1, ObjectPos::default(), 0);
-        obj_table.add_new(7, obj7, ObjectTag::Branch);
+        obj_table.insert(7, obj7, 0);
 
         let tree_reader = TreeReader {
             obj_access: obj_access,
