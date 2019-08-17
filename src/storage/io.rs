@@ -96,11 +96,11 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
     pub fn new(dev: Dev) -> Self {
         Self { dev: dev }
     }
-    fn sync_read(&self, block_start: u32, buf: &mut [u8]) -> Result<(), TdbError> {
+    pub fn sync_read(&self, block_start: u32, buf: &mut [u8]) -> Result<(), TdbError> {
         assert_eq!(buf.len() % BLOCK_SIZE, 0);
         self.dev.read(block_start, buf)
     }
-    fn poll_read<'a>(&'a self, block_start: u32, buf: &'a mut [u8]) -> BlockReader<'a, Dev> {
+    pub fn poll_read<'a>(&'a self, block_start: u32, buf: &'a mut [u8]) -> BlockReader<'a, Dev> {
         assert_eq!(buf.len() % BLOCK_SIZE, 0);
         BlockReader {
             reader: &self.dev,
@@ -110,13 +110,13 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
             waker: AtomicWaker::new(),
         }
     }
-    fn sync_write(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError> {
+    pub fn sync_write(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError> {
         assert_eq!(buf.len() % BLOCK_SIZE, 0);
         self.dev.write(block_start, buf)
     }
 
 
-    fn poll_write<'a>(&'a self, block_start: u32, buf: &'a [u8]) -> BlockWriter<'a, Dev> {
+    pub fn poll_write<'a>(&'a self, block_start: u32, buf: &'a [u8]) -> BlockWriter<'a, Dev> {
         assert_eq!(buf.len() % BLOCK_SIZE, 0);
         BlockWriter {
             writer: &self.dev,
@@ -131,7 +131,7 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         obj_pos: &ObjectPos,
         obj_tag: &ObjectTag,
     ) -> Result<Object, TdbError> {
-        let buf_len = obj_pos.block_len as usize * BLOCK_SIZE;
+        let buf_len = obj_pos.get_blk_len();
         let mut buf = Vec::with_capacity(buf_len);
         self.sync_read_node_raw(obj_pos, obj_tag, &mut buf)
     }
@@ -142,13 +142,13 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         obj_tag: &ObjectTag,
         buf: &mut [u8],
     ) -> Result<Object, TdbError> {
-        assert!(buf.len() >= obj_pos.block_len as usize * BLOCK_SIZE);
-        self.sync_read(obj_pos.block_start, buf)?;
-        Object::read(&buf[obj_pos.offset as usize..], obj_tag)
+        assert!(buf.len() >= obj_pos.get_blk_len() as usize * BLOCK_SIZE);
+        self.sync_read(obj_pos.get_bid(), buf)?;
+        Object::read(&buf[obj_pos.get_inner_offset()..], obj_tag)
     }
 
     pub fn sync_write_node(&self, obj_pos: &ObjectPos, obj: &Object) -> Result<(), TdbError> {
-        let buf_len = obj_pos.block_len as usize * BLOCK_SIZE;
+        let buf_len = obj_pos.get_blk_len();
         let mut buf = Vec::with_capacity(buf_len);
         self.sync_write_node_raw(obj_pos, obj, &mut buf)
     }
@@ -159,12 +159,12 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         obj: &Object,
         buf: &mut [u8],
     ) -> Result<(), TdbError> {
-        assert!(buf.len() >= obj_pos.block_len as usize * BLOCK_SIZE);
-        if obj_pos.offset != 0 {
-            self.sync_read(obj_pos.block_start, &mut buf[0..BLOCK_SIZE])?;
+        assert!(buf.len() >= obj_pos.get_blk_len());
+        if obj_pos.get_inner_offset() != 0 {
+            self.sync_read(obj_pos.get_bid(), &mut buf[0..BLOCK_SIZE])?;
         }
         obj.write(buf)?;
-        self.sync_write(obj_pos.block_start, buf)
+        self.sync_write(obj_pos.get_bid(), buf)
     }
 
     pub async fn async_read_node_raw(
@@ -173,9 +173,9 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         obj_tag: &ObjectTag,
         buf: &mut [u8],
     ) -> Result<Object, TdbError> {
-        assert!(buf.len() >= obj_pos.block_len as usize * BLOCK_SIZE);
-        self.poll_read(obj_pos.block_start, buf).await?;
-        Object::read(&buf[obj_pos.offset as usize..], obj_tag)
+    assert!(buf.len() >= obj_pos.get_blk_len() );
+        self.poll_read(obj_pos.get_bid(), buf).await?;
+        Object::read(&buf[obj_pos.get_inner_offset()..], obj_tag)
     }
 
     pub async fn async_write_node_raw(
@@ -184,23 +184,23 @@ impl<Dev: RawBlockDev + Unpin> BlockDev<Dev> {
         obj: &Object,
         buf: &mut [u8],
     ) -> Result<(), TdbError> {
-        assert!(buf.len() >= obj_pos.block_len as usize * BLOCK_SIZE);
-        if obj_pos.offset != 0 {
-            self.poll_write(obj_pos.block_start, &mut buf[0..BLOCK_SIZE])
+        assert!(buf.len() >= obj_pos.get_blk_len() );
+        if obj_pos.get_inner_offset() != 0 {
+            self.poll_write(obj_pos.get_bid(), &mut buf[0..BLOCK_SIZE])
                 .await?;
         }
         obj.write(buf)?;
-        self.poll_write(obj_pos.block_start, buf).await
+        self.poll_write(obj_pos.get_bid(), buf).await
     }
 }
 
 pub struct Dummy {}
 impl RawBlockDev for Dummy {
     fn read(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError> {
-        unimplemented!()
+        Ok(())
     }
     fn write(&self, block_start: u32, buf: &[u8]) -> Result<(), TdbError> {
-        unimplemented!()
+        Ok(())
     }
     fn async_read<F: FnOnce()>(
         &self,

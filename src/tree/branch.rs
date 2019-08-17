@@ -1,10 +1,10 @@
 use super::{Key, MAX_KEY_LEN};
 use crate::error::TdbError;
 use crate::object::{
-    AsObject, Object, ObjectDeserialize, ObjectId, ObjectInfo, ObjectSerialize, ObjectTag,
+    AsObject, Object,  ObjectId, ObjectInfo,ObjectTag,
     UNUSED_OID,
 };
-use crate::storage::BLOCK_SIZE;
+use crate::storage::{BLOCK_SIZE,Deserialize,Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
@@ -171,7 +171,7 @@ impl Branch {
     }
 }
 
-impl ObjectSerialize for Branch {
+impl Serialize for Branch {
     fn serialize(&self, mut writer: &mut [u8]) -> Result<(), TdbError> {
         assert!(self.get_size() < Self::get_maxsize());
         // object info
@@ -195,7 +195,7 @@ impl ObjectSerialize for Branch {
     }
 }
 
-impl ObjectDeserialize for Branch {
+impl Deserialize for Branch {
     fn deserialize(mut reader: &[u8]) -> Result<Self, TdbError> {
         assert!(reader.len() > Self::get_header_size());
         // object info

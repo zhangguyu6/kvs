@@ -9,6 +9,7 @@ pub enum TdbError {
     SerializeError,
     DeserializeError,
     Restart,
+    NoSpace,
 }
 
 impl fmt::Display for TdbError {

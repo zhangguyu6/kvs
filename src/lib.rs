@@ -5,9 +5,8 @@
 mod utils; 
 mod error;
 mod transaction;
-// mod index;
-// mod nodetable;
 mod tree;
 mod storage;
 mod cache;
 mod object;
+mod meta;

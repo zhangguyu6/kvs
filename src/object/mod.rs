@@ -12,6 +12,7 @@ pub use object_table::ObjectTable;
 
 use crate::error::TdbError;
 use crate::tree::{Branch, Entry, Leaf};
+use crate::storage::{Serialize,Deserialize};
 use std::mem;
 use std::sync::Arc;
 use std::u32;
@@ -221,15 +222,8 @@ impl Into<u64> for ObjectInfo {
     }
 }
 
-pub trait ObjectSerialize {
-    fn serialize(&self, writer: &mut [u8]) -> Result<(), TdbError>;
-}
 
-pub trait ObjectDeserialize: Sized {
-    fn deserialize(reader: &[u8]) -> Result<Self, TdbError>;
-}
-
-pub trait AsObject: ObjectDeserialize + ObjectSerialize {
+pub trait AsObject: Deserialize + Serialize {
     fn get_tag(&self) -> ObjectTag;
     fn get_key(&self) -> &[u8];
     fn get_ref(obejct_ref: &Object) -> &Self;
