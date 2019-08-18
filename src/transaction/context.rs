@@ -1,7 +1,7 @@
 use super::TimeStamp;
 use crate::cache::{IndexCache, MutCache};
-use crate::object::{ObjectAllocater, ObjectTable};
-use crate::storage::{BlockDev, RawBlockDev,BlockAllocater};
+use crate::meta::{ObjectAllocater, ObjectTable, SegementInfoTable, SuperBlock};
+use crate::storage::{BlockDev, RawBlockDev};
 use std::sync::Arc;
 
 pub struct Context<C: IndexCache, D: RawBlockDev + Unpin> {
@@ -22,9 +22,9 @@ impl<C: IndexCache, D: RawBlockDev + Unpin> Clone for Context<C, D> {
     }
 }
 
-pub struct MutContext<C:MutCache> {
-    pub dirty_cache:C,
-    pub obj_allocater:ObjectAllocater,
-    pub block_allocater:BlockAllocater
+pub struct MutContext<C: MutCache> {
+    pub super_block: SuperBlock,
+    pub dirty_cache: C,
+    pub obj_allocater: ObjectAllocater,
+    pub block_allocater: SegementInfoTable,
 }
- 

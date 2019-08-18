@@ -1,14 +1,7 @@
-mod object_access;
-mod object_allocater;
-mod object_modify;
 mod object_ref;
-mod object_table;
 
-pub use object_access::ObjectAccess;
-pub use object_allocater::ObjectAllocater;
-pub use object_modify::ObjectModify;
+
 pub use object_ref::{ObjectRef, Versions};
-pub use object_table::ObjectTable;
 
 use crate::error::TdbError;
 use crate::tree::{Branch, Entry, Leaf};

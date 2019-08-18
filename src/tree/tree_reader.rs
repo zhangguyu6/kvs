@@ -1,6 +1,7 @@
 use super::{Branch, Leaf};
 use crate::cache::IndexCache;
-use crate::object::{Object, ObjectAccess, ObjectId, UNUSED_OID};
+use crate::object::{Object, ObjectId, UNUSED_OID};
+use crate::transaction::ObjectAccess;
 use crate::storage::RawBlockDev;
 
 use std::borrow::Borrow;
@@ -172,7 +173,7 @@ mod tests {
     use crate::object::*;
     use crate::storage::{BlockDev, Dummy, ObjectPos};
     use crate::tree::Entry;
-
+    use crate::meta::ObjectTable;
     #[test]
     fn test_tree_reader() {
         let dummy = Dummy {};

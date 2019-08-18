@@ -1,4 +1,4 @@
-use super::ObjectId;
+use crate::object::ObjectId;
 use crate::utils::BitMap;
 
 pub struct ObjectAllocater {

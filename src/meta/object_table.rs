@@ -1,5 +1,5 @@
-use super::{Object, ObjectId, ObjectRef, Versions};
 use crate::error::TdbError;
+use crate::object::{Object, ObjectId, ObjectRef, Versions};
 use crate::storage::{BlockDev, RawBlockDev};
 use crate::transaction::TimeStamp;
 use crate::utils::RadixTree;
@@ -90,7 +90,8 @@ impl ObjectTable {
             Err(oid)
         }
     }
-
+    // Try to extend object table
+    // Return current cap
     pub fn extend(&self, extend: usize) -> Result<usize, TdbError> {
         self.tree.extend(extend)
     }

@@ -1,7 +1,9 @@
 use super::{Branch, Entry, Key, Leaf, Val, MAX_KEY_LEN};
 use crate::cache::MutCache;
-use crate::object::{Object, ObjectId, ObjectModify, UNUSED_OID};
+use crate::meta::ObjectAllocater;
+use crate::object::{Object, ObjectId, UNUSED_OID};
 use crate::storage::{ObjectPos, RawBlockDev};
+use crate::transaction::ObjectModify;
 use crate::transaction::TimeStamp;
 
 use std::borrow::Borrow;
@@ -494,6 +496,7 @@ impl<'a, C: MutCache, D: RawBlockDev + Unpin> TreeWriter<'a, C, D> {
 mod tests {
     use super::*;
     use crate::cache::MutObjectCache;
+    use crate::meta::ObjectTable;
     use crate::object::*;
     use crate::storage::{BlockDev, Dummy};
     #[test]
@@ -595,6 +598,6 @@ mod tests {
                 assert_eq!(tree_writer.get(&key), None);
             }
         }
-        println!("{:?}",tree_writer.root_oid);
+        println!("{:?}", tree_writer.root_oid);
     }
 }

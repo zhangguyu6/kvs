@@ -1,5 +1,6 @@
 use crate::cache::IndexCache;
-use crate::object::{Object, ObjectId, ObjectTable};
+use crate::object::{Object, ObjectId };
+use crate::meta::ObjectTable;
 use crate::storage::{BlockDev, RawBlockDev};
 use crate::transaction::{Context, TimeStamp};
 use crate::tree::Entry;

@@ -1,7 +1,7 @@
-use super::SuperBlock;
 use crate::error::TdbError;
-use crate::storage::{BlockId, Deserialize, ObjectPos, Serialize, BLOCK_SIZE};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use crate::storage::{
+    BlockId, ObjectPos, BLOCK_SIZE,
+};
 use std::mem;
 
 pub type SegementId = u16;
@@ -37,55 +37,20 @@ impl Into<u32> for SegementInfo {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct SegementPage(SegementId, Vec<SegementInfo>);
 
-impl SegementPage {
-    fn get_segement(&self, sid: SegementId) -> Option<&SegementInfo> {
-        self.1.get((sid - self.0) as usize)
-    }
-
-    fn get_segement_mut(&mut self, sid: SegementId) -> Option<&mut SegementInfo> {
-        self.1.get_mut((sid - self.0) as usize)
-    }
-}
-
-impl Serialize for SegementPage {
-    fn serialize(&self, mut writer: &mut [u8]) -> Result<(), TdbError> {
-        assert!(writer.len() >= SEGEMENT_PAGE_SIZE);
-        assert!(self.1.len() <= SEGEMENT_PER_PAGE);
-        writer.write_u16::<LittleEndian>(self.0)?;
-        writer.write_u16::<LittleEndian>(self.1.len() as u16)?;
-        for segement_info in self.1.iter() {
-            writer.write_u32::<LittleEndian>(segement_info.clone().into())?;
-        }
-        Ok(())
-    }
-}
-
-impl Deserialize for SegementPage {
-    fn deserialize(mut reader: &[u8]) -> Result<Self, TdbError> {
-        let sid = reader.read_u16::<LittleEndian>()?;
-        let len = reader.read_u16::<LittleEndian>()? as usize;
-        let mut segements = Vec::with_capacity(len);
-        for _ in 0..len {
-            segements.push(SegementInfo::from(reader.read_u32::<LittleEndian>()?));
-        }
-        Ok(SegementPage(sid, segements))
-    }
-}
 
 #[derive()]
-pub struct SegementInfoTable<'a> {
-    superblock: &'a SuperBlock,
+pub struct SegementInfoTable {
     segements: Vec<SegementInfo>,
     active_segement: SegementId,
     // start block id of first segement
     start_block: BlockId,
+    // segement page bid start
+    start_segement_page_bid: BlockId,
     total_used_size: usize,
 }
 
-impl<'a> SegementInfoTable<'a> {
+impl SegementInfoTable {
     fn allocate(&mut self, size: usize) -> Result<ObjectPos, TdbError> {
         if self.get_segement_size(self.active_segement) + size > SEGEMENT_SIZE {
             self.allocate_sid()?;
@@ -118,8 +83,7 @@ impl<'a> SegementInfoTable<'a> {
     }
 
     fn get_blockid(&self, sid: SegementId) -> BlockId {
-        ((self.start_block as usize * BLOCK_SIZE + sid as usize * SEGEMENT_SIZE) / BLOCK_SIZE)
-            as u32
+        self.start_segement_page_bid + sid as u32 / SEGEMENT_PER_PAGE as u32
     }
 
     fn get_segementid(&self, bid: BlockId) -> SegementId {

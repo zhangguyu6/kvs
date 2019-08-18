@@ -1,5 +1,6 @@
 use crate::cache::MutCache;
-use crate::object::{MutObject, Object, ObjectAllocater, ObjectId, ObjectTable};
+use crate::object::{MutObject, Object, ObjectId};
+use crate::meta::{ObjectAllocater,ObjectTable};
 use crate::storage::{BlockDev, RawBlockDev};
 use crate::transaction::{Context, TimeStamp};
 use std::sync::Arc;
