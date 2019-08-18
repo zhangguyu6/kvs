@@ -1,7 +1,12 @@
+use crate::object::ObjectTag;
 use std::io::SeekFrom;
 
-pub const MAX_DATABASE_SIZE: u64 = 1<< 44;
-pub const MAX_OBJECT_SIZE:u64 = 1<<20;
+// [20~63)
+pub const MAX_DATABASE_SIZE: u64 = (1 << 44) - 1;
+// [4~20)
+pub const MAX_OBJECT_SIZE: u64 = (1 << 16) - 1;
+// [0~4)
+pub const MAX_OBJECT_TAG_SIZE: u64 = (1 << 4) - 1;
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub struct ObjectPos(pub u64);
@@ -13,9 +18,11 @@ impl Into<SeekFrom> for ObjectPos {
 }
 
 impl ObjectPos {
-    pub fn new(pos: u64, len: usize) -> Self {
-        Self(((pos as u64) << 20) + len as u64)
+    pub fn new(pos: u64, len: usize, tag: ObjectTag) -> Self {
+        let tag: u8 = tag.into();
+        Self((pos << 20) + ((len as u64) << 4) + (tag as u64))
     }
+
     #[inline]
     pub fn get_pos(&self) -> u64 {
         self.0 >> 20
@@ -23,7 +30,12 @@ impl ObjectPos {
 
     #[inline]
     pub fn get_len(&self) -> usize {
-        (self.0 & 0xfffff) as usize
+        ((self.0 >> 4) & 0xfffff) as usize
+    }
+
+    #[inline]
+    pub fn get_tag(&self) -> ObjectTag {
+        ObjectTag::from((self.0 & 0xf) as u8)
     }
 }
 

@@ -2,7 +2,7 @@ mod io;
 mod obj_pos;
 mod dev;
 use crate::error::TdbError;
-pub use io::{BlockDev, Dummy, RawBlockDev};
+pub use dev::{DataLogFile,MetaFile,MetaLogFile};
 pub use obj_pos::ObjectPos;
 
 
