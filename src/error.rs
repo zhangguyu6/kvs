@@ -10,6 +10,7 @@ pub enum TdbError {
     DeserializeError,
     Restart,
     NoSpace,
+    NotFindObject
 }
 
 impl fmt::Display for TdbError {

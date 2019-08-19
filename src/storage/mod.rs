@@ -1,20 +1,12 @@
-mod io;
 mod obj_pos;
 mod dev;
 use crate::error::TdbError;
-pub use dev::{DataLogFile,MetaFile,MetaLogFile};
-pub use obj_pos::ObjectPos;
+pub use dev::{DataLogFile,MetaTableFile,MetaLogFile,Dev};
+pub use obj_pos::{ObjectPos,MAX_DATABASE_SIZE,MAX_OBJECT_SIZE};
 
 
-pub const BLOCK_SIZE: usize = 4096;
-// 16T
-pub const MAX_DEV_SIZE: usize = 1 << 44;
-// 1M
-pub const MAX_OBJ_SIZE: usize = 1 << 20;
 
-pub type BlockId = u32;
  
-pub const UNUSED_BLOCK_ID: u32 = 0;
 
 
 pub trait Serialize {

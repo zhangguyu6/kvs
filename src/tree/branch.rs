@@ -4,14 +4,14 @@ use crate::object::{
     AsObject, Object,  ObjectId, ObjectInfo,ObjectTag,
     UNUSED_OID,
 };
-use crate::storage::{BLOCK_SIZE,Deserialize,Serialize};
+use crate::storage::{Deserialize,Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
 use std::mem;
 use std::u16;
 
-const MAX_BRANCH_SIZE: usize = BLOCK_SIZE;
+const MAX_BRANCH_SIZE: usize = 4096;
 // key + key len + nodeid
 const MAX_NONSPLIT_BRANCH_SIZE: usize =
     MAX_BRANCH_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() - mem::size_of::<u16>();

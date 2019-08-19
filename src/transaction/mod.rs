@@ -1,5 +1,4 @@
 mod context;
-mod log;
 mod object_access;
 mod object_modify;
 

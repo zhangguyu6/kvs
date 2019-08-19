@@ -4,14 +4,14 @@ use crate::object::{
     AsObject, Object, ObjectId, ObjectInfo, ObjectTag,
     UNUSED_OID,
 };
-use crate::storage::{BLOCK_SIZE,Deserialize,Serialize};
+use crate::storage::{Deserialize,Serialize,MAX_OBJECT_SIZE};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::convert::TryInto;
 use std::io::{Read, Write};
 use std::mem;
 use std::u16;
 
-const MAX_ENTRY_SIZE: usize = u16::MAX as usize * BLOCK_SIZE;
+const MAX_ENTRY_SIZE: usize = MAX_OBJECT_SIZE as usize ;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Entry {

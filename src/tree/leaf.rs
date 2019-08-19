@@ -1,17 +1,14 @@
 use super::{Key, MAX_KEY_LEN};
 use crate::error::TdbError;
-use crate::object::{
-    AsObject, Object, ObjectId, ObjectInfo, ObjectTag,
-    UNUSED_OID,
-};
-use crate::storage::{BLOCK_SIZE,Deserialize,Serialize};
+use crate::object::{AsObject, Object, ObjectId, ObjectInfo, ObjectTag, UNUSED_OID};
+use crate::storage::{Deserialize, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
 use std::mem;
 use std::u16;
 
-const MAX_LEAF_SIZE: usize = BLOCK_SIZE;
+const MAX_LEAF_SIZE: usize = 4096;
 // key + key len + nodeid
 const MAX_NONSPLIT_LEAF_SIZE: usize =
     MAX_LEAF_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() - mem::size_of::<u16>();
@@ -150,12 +147,12 @@ impl Leaf {
     #[inline]
     pub fn should_merge(left_branch: &Leaf, right_branch: &Leaf) -> bool {
         left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
-                <= MAX_NONSPLIT_LEAF_SIZE
+            <= MAX_NONSPLIT_LEAF_SIZE
     }
     #[inline]
     pub fn should_rebalance(left_branch: &Leaf, right_branch: &Leaf) -> bool {
         left_branch.info.size + right_branch.info.size - Leaf::get_header_size()
-                > MAX_NONSPLIT_LEAF_SIZE
+            > MAX_NONSPLIT_LEAF_SIZE
     }
     #[inline]
     pub fn get_key(&self) -> &Key {
@@ -327,8 +324,6 @@ mod tests {
     }
 
     #[test]
-    fn test_should() {
-
-    }
+    fn test_should() {}
 
 }

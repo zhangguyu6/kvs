@@ -1,6 +1,6 @@
 mod object_allocater;
 mod object_table;
-mod super_block;
+mod check_point;
 pub use object_allocater::ObjectAllocater;
-// pub use object_table::ObjectTable;
-// pub use super_block::SuperBlock;
+pub use object_table::{ObjectTable,ObjectTablePage};
+pub use check_point::CheckPoint;
