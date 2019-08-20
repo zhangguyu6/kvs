@@ -20,30 +20,16 @@ pub struct Dev {
 impl Dev {
     fn open<P: AsRef<Path>>(dir_path: P) -> Result<Self, TdbError> {
         let mut options = fs::OpenOptions::new();
+        let options_mut = options.create(true).read(true).write(true).append(true);
         let mut meta_table_path = PathBuf::from(dir_path.as_ref());
         meta_table_path.push("meta_table.db");
-        let meta_table_file = options
-            .create(true)
-            .read(true)
-            .write(true)
-            .append(true)
-            .open(&meta_table_path)?;
+        let meta_table_file = options_mut.open(&meta_table_path)?;
         let mut meta_log_file_path = PathBuf::from(dir_path.as_ref());
         meta_log_file_path.push("meta_log_file.db");
-        let mut meta_log_file = options
-            .create(true)
-            .read(true)
-            .write(true)
-            .append(true)
-            .open(&meta_log_file_path)?;
+        let mut meta_log_file = options_mut.open(&meta_log_file_path)?;
         let mut data_log_file_path = PathBuf::from(dir_path.as_ref());
         data_log_file_path.push("data_log_file.db");
-        let mut data_log_file = options
-            .create(true)
-            .read(true)
-            .write(true)
-            .append(true)
-            .open(&data_log_file_path)?;
+        let mut data_log_file = options_mut.open(&data_log_file_path)?;
         Ok(Dev {
             meta_table_path,
             meta_table_file,
@@ -85,6 +71,12 @@ pub struct DataLogFile {
     // file: File,
 }
 
+impl Clone for DataLogFile {
+    fn clone(&self) -> Self {
+        unimplemented!()
+    }
+}
+
 impl Default for DataLogFile {
     fn default() -> Self {
         Self {}
@@ -92,7 +84,11 @@ impl Default for DataLogFile {
 }
 
 impl DataLogFile {
-    pub fn sync_read_obj(&mut self, obj_pos: &ObjectPos) -> Result<Object, TdbError> {
+    pub fn read_obj(&mut self, obj_pos: &ObjectPos) -> Result<Object, TdbError> {
+        unimplemented!()
+    }
+
+    pub async fn async_read_obj(&mut self, obj_pos: &ObjectPos) -> Result<Object, TdbError> {
         unimplemented!()
     }
 }
@@ -105,5 +101,4 @@ mod tests {
     fn test_dev() {
         assert!(Dev::open(env::current_dir().unwrap()).is_ok());
     }
-
 }
