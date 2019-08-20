@@ -10,6 +10,6 @@ use std::u8;
 // 255 byte
 pub const MAX_KEY_LEN: usize = u8::MAX as usize ;
 
-type Key = Vec<u8>;
+pub type Key = Vec<u8>;
 
-type Val = Vec<u8>;
+pub type Val = Vec<u8>;

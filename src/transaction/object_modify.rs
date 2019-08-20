@@ -5,7 +5,7 @@
 // use crate::transaction::{Context, TimeStamp};
 // use std::sync::Arc;
 
-// const DEFAULT_OBJECT_EXTEND_NUM: usize = 1 << 16;
+// const : usize = 1 << 16;
 
 // pub struct ObjectModify<'a, C: MutCache, D: RawBlockDev + Unpin> {
 //     pub ts: TimeStamp,

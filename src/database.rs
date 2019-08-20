@@ -1,7 +1,7 @@
 use crate::cache::{BackgroundCache, MutObjectCache};
 use crate::error::TdbError;
 use crate::meta::{CheckPoint, ObjectAllocater, ObjectTable};
-use crate::object::ObjectId;
+use crate::object::{ObjectId,MutObject};
 use crate::storage::{DataLogFile, Dev, MetaLogFile, MetaTableFile};
 use crate::transaction::{ImmutContext, MutContext, TimeStamp};
 
@@ -18,6 +18,7 @@ struct MutInner {
     pub obj_allocater: ObjectAllocater,
     pub dirty_cache: MutObjectCache,
     pub cp: CheckPoint,
+    pub meta_changes: Vec<(ObjectId,MutObject)>,
     pub gc_ctx: Vec<(Weak<Context>, Vec<ObjectId>)>,
 }
 

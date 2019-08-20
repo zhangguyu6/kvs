@@ -11,7 +11,7 @@ use std::u32;
 
 const MAX_CAP: u32 = u32::MAX;
 
-pub const OBJECT_TABLE_DEFAULT_PAGE_NUM: usize = MAX_CAP as usize / OBJECT_TABLE_ENTRY_PRE_PAGE;
+const OBJECT_TABLE_DEFAULT_PAGE_NUM: usize = MAX_CAP as usize / OBJECT_TABLE_ENTRY_PRE_PAGE;
 // 4K
 pub const OBJECT_TABLE_PAGE_SIZE: usize = 1 << 12;
 // 511

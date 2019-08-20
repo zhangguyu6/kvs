@@ -4,19 +4,20 @@ use crate::object::{Object, ObjectId};
 use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::mem;
-use std::sync::Arc;
 pub struct CheckPoint {
     // current checkpoint size,
-    check_point_len: u32,
+    pub check_point_len: u32,
     // crc fast
-    crc: u32,
+    pub crc: u32,
     // for gc
-    data_log_remove_len: u64,
-    data_log_len: u64,
-    root_oid: ObjectId,
+    pub data_log_remove_len: u64,
+    pub data_log_len: u64,
+    pub root_oid: ObjectId,
     // meta log area used size, 0 mean meta log is apply
-    meta_log_total_len: u32,
-    obj_changes: Vec<(ObjectId, Option<ObjectPos>)>,
+    pub meta_log_total_len: u32,
+    // meta file len = allocated_obj_nums * 4096
+    pub allocated_obj_nums: u32,
+    pub obj_changes: Vec<(ObjectId, Option<ObjectPos>)>,
 }
 
 impl CheckPoint {
@@ -32,6 +33,8 @@ impl CheckPoint {
             // root_oid
             + mem::size_of::<u32>()
             // meta_log_total_len
+            + mem::size_of::<u32>()
+            // allocated_obj_nums 
             + mem::size_of::<u32>()
             // obj_changes len
             + mem::size_of::<u32>()
@@ -51,6 +54,8 @@ impl CheckPoint {
             // root_oid
             + mem::size_of::<u32>()
             // meta_log_total_len
+            + mem::size_of::<u32>()
+            // allocated_obj_nums
             + mem::size_of::<u32>()
     }
 
@@ -75,6 +80,7 @@ impl Serialize for CheckPoint {
         writer.write_u64::<LittleEndian>(self.data_log_len)?;
         writer.write_u32::<LittleEndian>(self.root_oid)?;
         writer.write_u32::<LittleEndian>(self.meta_log_total_len)?;
+        writer.write_u32::<LittleEndian>(self.allocated_obj_nums)?;
         writer.write_u32::<LittleEndian>(self.obj_changes.len() as u32)?;
         for i in 0..self.obj_changes.len() {
             writer.write_u32::<LittleEndian>(self.obj_changes[i].0)?;
@@ -97,6 +103,7 @@ impl Deserialize for CheckPoint {
         let data_log_len = reader.read_u64::<LittleEndian>()?;
         let root_oid = reader.read_u32::<LittleEndian>()?;
         let meta_log_total_len = reader.read_u32::<LittleEndian>()?;
+        let allocated_obj_nums = reader.read_u32::<LittleEndian>()?;
         let obj_change_len = reader.read_u32::<LittleEndian>()? as usize;
         let mut obj_changes = Vec::with_capacity(obj_change_len);
         for _ in 0..obj_change_len {
@@ -115,6 +122,7 @@ impl Deserialize for CheckPoint {
             data_log_len,
             root_oid,
             meta_log_total_len,
+            allocated_obj_nums,
             obj_changes,
         })
     }
