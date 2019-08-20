@@ -1,4 +1,3 @@
-use super::MutCache;
 use crate::object::{MutObject, ObjectId};
 use lru_cache::LruCache;
 use std::collections::HashMap;
@@ -20,7 +19,7 @@ impl MutObjectCache {
 // Readonly in cache
 // New/Del/Dirty in dirties
 // There is no intersection between the dirties and cache
-impl MutCache for MutObjectCache {
+impl  MutObjectCache {
     //  Return true if oid in cache or in dirties
     fn contain(&mut self, oid: ObjectId) -> bool {
         self.dirties.contains_key(&oid) || self.cache.contains_key(&oid)
