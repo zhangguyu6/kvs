@@ -1,4 +1,3 @@
-use super::IndexCache;
 use crate::object::{Object, ObjectId};
 use crate::transaction::TimeStamp;
 use crate::tree::Entry;
@@ -18,7 +17,7 @@ enum ObjectOp {
     Clear,
     Close,
 }
-#[derive(Clone)]
+
 pub struct BackgroundCache {
     sender: Sender<ObjectOp>,
 }
@@ -74,26 +73,26 @@ impl BackgroundCacheInner {
     }
 }
 
-impl IndexCache for BackgroundCache {
-    fn insert(&self, oid: ObjectId, ts: TimeStamp, arc_obj: Arc<Object>) {
+impl  BackgroundCache {
+    pub fn insert(&self, oid: ObjectId, ts: TimeStamp, arc_obj: Arc<Object>) {
         if !arc_obj.is::<Entry>() {
             self.sender
                 .try_send(ObjectOp::Insert(oid, ts, arc_obj))
                 .expect("send error");
         }
     }
-    fn get(&self, oid: ObjectId, ts: TimeStamp) -> Option<Arc<Object>> {
+    pub fn get(&self, oid: ObjectId, ts: TimeStamp) -> Option<Arc<Object>> {
         None
     }
-    fn remove(&self, oid: ObjectId, ts: TimeStamp) {
+    pub fn remove(&self, oid: ObjectId, ts: TimeStamp) {
         self.sender
             .try_send(ObjectOp::Remove(oid, ts))
             .expect("send error");
     }
-    fn clear(&self) {
+    pub fn clear(&self) {
         self.sender.try_send(ObjectOp::Clear).expect("send error");
     }
-    fn close(&self) {
+    pub fn close(&self) {
         self.sender.try_send(ObjectOp::Close).expect("send error");
     }
 }
