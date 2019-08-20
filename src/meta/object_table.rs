@@ -1,3 +1,4 @@
+use crate::error::TdbError;
 use crate::object::{Object, ObjectId, ObjectRef, Versions};
 use crate::storage::{DataLogFile, ObjectPos};
 use crate::transaction::TimeStamp;
@@ -52,28 +53,62 @@ impl ObjectTable {
         self.obj_table_pages.get_len() as usize
     }
 
-    pub fn get(&self, oid: ObjectId, ts: TimeStamp, file: &mut DataLogFile) -> Option<Arc<Object>> {
+    pub fn get(
+        &self,
+        oid: ObjectId,
+        ts: TimeStamp,
+        file: &mut DataLogFile,
+    ) -> Result<Option<Arc<Object>>, TdbError> {
         if let Some(read_versions) = self.obj_table_pages.get_readlock(oid) {
             if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
                 if let Some(arc_obj) = obj_ref.obj_ref.upgrade() {
-                    return Some(arc_obj);
+                    return Ok(Some(arc_obj));
                 } else {
                     let pos = obj_ref.obj_pos.clone();
                     drop(read_versions);
                     let mut write_versions = self.obj_table_pages.get_writelock(oid).unwrap();
                     let obj_mut = write_versions.find_obj_mut(ts).unwrap();
                     if let Some(arc_obj) = obj_mut.obj_ref.upgrade() {
-                        return Some(arc_obj);
+                        return Ok(Some(arc_obj));
                     } else {
-                        let obj = file.sync_read_obj(&pos).unwrap();
+                        let obj = file.read_obj(&pos)?;
                         let arc_obj = Arc::new(obj);
                         obj_mut.obj_ref = Arc::downgrade(&arc_obj);
-                        return Some(arc_obj);
+                        return Ok(Some(arc_obj));
                     }
                 }
             }
         }
-        None
+        Ok(None)
+    }
+
+    pub async fn async_get(
+        &self,
+        oid: ObjectId,
+        ts: TimeStamp,
+        file: &mut DataLogFile,
+    ) -> Result<Option<Arc<Object>>, TdbError> {
+        if let Some(read_versions) = self.obj_table_pages.get_readlock(oid) {
+            if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
+                if let Some(arc_obj) = obj_ref.obj_ref.upgrade() {
+                    return Ok(Some(arc_obj));
+                } else {
+                    let pos = obj_ref.obj_pos.clone();
+                    drop(read_versions);
+                    let mut write_versions = self.obj_table_pages.get_writelock(oid).unwrap();
+                    let obj_mut = write_versions.find_obj_mut(ts).unwrap();
+                    if let Some(arc_obj) = obj_mut.obj_ref.upgrade() {
+                        return Ok(Some(arc_obj));
+                    } else {
+                        let obj = file.async_read_obj(&pos).await?;
+                        let arc_obj = Arc::new(obj);
+                        obj_mut.obj_ref = Arc::downgrade(&arc_obj);
+                        return Ok(Some(arc_obj));
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     // Return Ok if no need to gc, Err(oid) for next gc
@@ -174,14 +209,23 @@ mod tests {
         let obj_ref = ObjectRef::new(&arc_obj, ObjectPos::default(), 0);
         assert_eq!(obj_table.insert(0, obj_ref, 0), Ok(()));
         let mut data_file = DataLogFile::default();
-        assert_eq!(obj_table.get(0, 0, &mut data_file), Some(arc_obj.clone()));
-        assert_eq!(obj_table.get(0, 1, &mut data_file), Some(arc_obj.clone()));
+        assert_eq!(
+            obj_table.get(0, 0, &mut data_file),
+            Ok(Some(arc_obj.clone()))
+        );
+        assert_eq!(
+            obj_table.get(0, 1, &mut data_file),
+            Ok(Some(arc_obj.clone()))
+        );
         assert_eq!(obj_table.remove(0, 1, 0), Err(0));
-        assert_eq!(obj_table.get(0, 0, &mut data_file), Some(arc_obj.clone()));
-        assert_eq!(obj_table.get(0, 1, &mut data_file), None);
+        assert_eq!(
+            obj_table.get(0, 0, &mut data_file),
+            Ok(Some(arc_obj.clone()))
+        );
+        assert_eq!(obj_table.get(0, 1, &mut data_file), Ok(None));
         assert_eq!(obj_table.try_gc(0, 1), Ok(()));
-        assert_eq!(obj_table.get(0, 0, &mut data_file), None);
-        assert_eq!(obj_table.get(0, 1, &mut data_file), None);
+        assert_eq!(obj_table.get(0, 0, &mut data_file), Ok(None));
+        assert_eq!(obj_table.get(0, 1, &mut data_file), Ok(None));
         assert_eq!(
             obj_table.insert(0, ObjectRef::new(&arc_obj, ObjectPos::default(), 0), 0),
             Ok(())
