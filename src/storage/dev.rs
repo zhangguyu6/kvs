@@ -1,20 +1,23 @@
 use super::ObjectPos;
-use crate::meta::ObjectTablePage;
+use crate::meta::{CheckPoint, ObjectTablePage};
+use crate::storage::{Deserialize, Serialize};
 use crate::{
     error::TdbError,
     object::{Object, ObjectId, ObjectTag},
 };
-use std::fs::{self, DirEntry, File as StdFile};
+use std::fs::{self, File};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use tokio::fs::File;
+
+pub const META_LOG_FILE_MAX_SIZE: usize = 1 << 21;
 
 pub struct Dev {
     meta_table_path: PathBuf,
-    meta_table_file: StdFile,
+    meta_table_file: File,
     meta_log_file_path: PathBuf,
-    meta_log_file: StdFile,
+    meta_log_file: File,
     data_log_file_path: PathBuf,
-    data_log_file: StdFile,
+    data_log_file: File,
 }
 
 impl Dev {
@@ -44,9 +47,7 @@ impl Dev {
 impl Dev {
     pub fn get_meta_table_file(&self) -> Result<MetaTableFile, TdbError> {
         let file = self.meta_table_file.try_clone()?;
-        Ok(MetaTableFile {
-            file: File::from_std(file),
-        })
+        Ok(MetaTableFile { file: file })
     }
 }
 
@@ -55,16 +56,55 @@ pub struct MetaTableFile {
 }
 
 impl MetaTableFile {
-    pub fn sync_read_page(&mut self, obj_pos: &ObjectPos) -> Result<ObjectTablePage, TdbError> {
+    pub fn read_page(&mut self, page_id: u32) -> Result<ObjectTablePage, TdbError> {
+        self.file.seek(SeekFrom::Start())
         unimplemented!()
     }
-    pub fn sync_write_page(&mut self, page: ObjectTablePage) -> Result<(), TdbError> {
+    pub fn write_page(&mut self, page: ObjectTablePage) -> Result<(), TdbError> {
         unimplemented!()
     }
 }
 
 pub struct MetaLogFile {
-    file: File,
+    reader: BufReader<File>,
+    writer: BufWriter<File>,
+    size: usize,
+}
+
+impl MetaLogFile {
+    fn check(&mut self) -> Vec<CheckPoint> {
+        let mut result = Vec::new();
+        if self.size <= CheckPoint::min_len() {
+            return result;
+        } else if self.size > META_LOG_FILE_MAX_SIZE {
+            panic!("meta log file bigger than expect");
+        }
+        self.reader.seek(SeekFrom::Start(0)).unwrap();
+        loop {
+            match CheckPoint::deserialize(&mut self.reader) {
+                Ok(cp) => {
+                    if cp.meta_log_total_len == 0 {
+                        result.clear();
+                    }
+                    result.push(cp);
+                }
+                Err(_) => break,
+            }
+        }
+        return result;
+    }
+
+    fn write_cp(&mut self, cp: &CheckPoint) -> Result<(), TdbError> {
+        if self.size + cp.len() > META_LOG_FILE_MAX_SIZE {
+            return Err(TdbError::NoSpace);
+        } else {
+            self.writer.seek(SeekFrom::Start(self.size as u64))?;
+            cp.serialize(&mut self.writer)?;
+            self.size += cp.len();
+            self.writer.flush()?;
+            Ok(())
+        }
+    }
 }
 
 pub struct DataLogFile {
@@ -85,10 +125,6 @@ impl Default for DataLogFile {
 
 impl DataLogFile {
     pub fn read_obj(&mut self, obj_pos: &ObjectPos) -> Result<Object, TdbError> {
-        unimplemented!()
-    }
-
-    pub async fn async_read_obj(&mut self, obj_pos: &ObjectPos) -> Result<Object, TdbError> {
         unimplemented!()
     }
 }
