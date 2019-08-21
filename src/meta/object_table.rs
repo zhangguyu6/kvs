@@ -1,9 +1,11 @@
 use crate::error::TdbError;
 use crate::object::{Object, ObjectId, ObjectRef, Versions};
-use crate::storage::{DataLogFile, ObjectPos};
+use crate::storage::{DataLogFile, Deserialize, ObjectPos, Serialize};
 use crate::transaction::TimeStamp;
 use crate::utils::{Node, RadixTree};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use parking_lot::RwLock;
+use std::io::{Read, Write};
 use std::mem;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -16,16 +18,49 @@ const OBJECT_TABLE_DEFAULT_PAGE_NUM: usize = MAX_CAP as usize / OBJECT_TABLE_ENT
 pub const OBJECT_TABLE_PAGE_SIZE: usize = 1 << 12;
 // 511
 pub const OBJECT_TABLE_ENTRY_PRE_PAGE: usize =
-    (OBJECT_TABLE_PAGE_SIZE - mem::size_of::<ObjectId>() - mem::size_of::<u32>())
-        / mem::size_of::<u64>();
+    (OBJECT_TABLE_PAGE_SIZE - mem::size_of::<ObjectId>()) / mem::size_of::<u64>();
 
-#[derive(Clone)]
-pub struct ObjectTablePage(u32, Vec<Option<ObjectPos>>);
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct ObjectTablePage(u32, u32, Vec<Option<ObjectPos>>);
+
+impl Deserialize for ObjectTablePage {
+    fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
+        let page_id = reader.read_u32::<LittleEndian>()?;
+        let mut obj_poss = Vec::with_capacity(OBJECT_TABLE_ENTRY_PRE_PAGE);
+        let crc = reader.read_u32::<LittleEndian>()?;
+        for _ in 0..OBJECT_TABLE_ENTRY_PRE_PAGE {
+            let obj_pos = reader.read_u64::<LittleEndian>()?;
+            if obj_pos == 0 {
+                obj_poss.push(None);
+            } else {
+                obj_poss.push(Some(ObjectPos(obj_pos)));
+            }
+        }
+        Ok(Self(page_id, crc, obj_poss))
+    }
+}
+
+impl Serialize for ObjectTablePage {
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
+        writer.write_u32::<LittleEndian>(self.0)?;
+        writer.write_u32::<LittleEndian>(self.1)?;
+        for i in 0..OBJECT_TABLE_ENTRY_PRE_PAGE {
+            if let Some(obj_pos) = self.2.get(i) {
+                if let Some(obj_pos) = obj_pos {
+                    writer.write_u64::<LittleEndian>(obj_pos.0)?;
+                }
+            } else {
+                writer.write_u64::<LittleEndian>(0)?;
+            }
+        }
+        Ok(())
+    }
+}
 
 impl Into<Node<Versions>> for ObjectTablePage {
     fn into(mut self) -> Node<Versions> {
-        let mut versions = Vec::with_capacity(self.1.len());
-        for obj_pos in self.1.drain(..) {
+        let mut versions = Vec::with_capacity(self.2.len());
+        for obj_pos in self.2.drain(..) {
             if let Some(obj_pos) = obj_pos {
                 let obj_ref = ObjectRef::on_disk(obj_pos, 0);
                 versions.push(RwLock::new(Versions::new_only(obj_ref)));
@@ -72,35 +107,6 @@ impl ObjectTable {
                         return Ok(Some(arc_obj));
                     } else {
                         let obj = file.read_obj(&pos)?;
-                        let arc_obj = Arc::new(obj);
-                        obj_mut.obj_ref = Arc::downgrade(&arc_obj);
-                        return Ok(Some(arc_obj));
-                    }
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    pub async fn async_get(
-        &self,
-        oid: ObjectId,
-        ts: TimeStamp,
-        file: &mut DataLogFile,
-    ) -> Result<Option<Arc<Object>>, TdbError> {
-        if let Some(read_versions) = self.obj_table_pages.get_readlock(oid) {
-            if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
-                if let Some(arc_obj) = obj_ref.obj_ref.upgrade() {
-                    return Ok(Some(arc_obj));
-                } else {
-                    let pos = obj_ref.obj_pos.clone();
-                    drop(read_versions);
-                    let mut write_versions = self.obj_table_pages.get_writelock(oid).unwrap();
-                    let obj_mut = write_versions.find_obj_mut(ts).unwrap();
-                    if let Some(arc_obj) = obj_mut.obj_ref.upgrade() {
-                        return Ok(Some(arc_obj));
-                    } else {
-                        let obj = file.async_read_obj(&pos).await?;
                         let arc_obj = Arc::new(obj);
                         obj_mut.obj_ref = Arc::downgrade(&arc_obj);
                         return Ok(Some(arc_obj));
@@ -162,7 +168,7 @@ impl ObjectTable {
     }
 
     pub fn append_page(&self, obj_table_page: ObjectTablePage) {
-        let old_len = self.obj_table_pages.add_len(obj_table_page.1.len() as u32);
+        let old_len = self.obj_table_pages.add_len(obj_table_page.2.len() as u32);
         assert_eq!(
             old_len,
             OBJECT_TABLE_ENTRY_PRE_PAGE as u32 * obj_table_page.0
@@ -185,7 +191,7 @@ impl ObjectTable {
             let read_versions = versions.read();
             page.push(read_versions.get_newest_objpos());
         }
-        ObjectTablePage(page_id, page)
+        ObjectTablePage(page_id, 1234, page)
     }
 
     pub fn get_page_id(&self, oid: ObjectId) -> u32 {
@@ -236,10 +242,25 @@ mod tests {
         assert_eq!(obj_table.get_page_id(511), 1);
         let obj_table_page = obj_table.get_page(0);
         assert_eq!(obj_table_page.0, 0);
-        assert_eq!(obj_table_page.1.len(), 511);
-        assert_eq!(obj_table_page.1[0], Some(ObjectPos::default()));
+        assert_eq!(obj_table_page.2.len(), 511);
+        assert_eq!(obj_table_page.2[0], Some(ObjectPos::default()));
         for i in 1..511 {
-            assert_eq!(obj_table_page.1[i], None);
+            assert_eq!(obj_table_page.2[i], None);
         }
+    }
+
+    #[test]
+    fn test_object_table_serialize_deserialize() {
+        let mut buf: [u8; 4096] = [0; 4096];
+        let obj_page1 = ObjectTablePage(0, 0, vec![None; 511]);
+        let mut slice = &mut buf[..];
+        assert!(obj_page1.serialize(&mut slice).is_ok());
+        let obj_page2 = ObjectTablePage::deserialize(&mut (&buf[..])).unwrap();
+        assert_eq!(obj_page1, obj_page2);
+        let mut obj_page1 = ObjectTablePage(1, 1234, vec![None; 511]);
+        obj_page1.2[0] = Some(ObjectPos(1));
+        assert!(obj_page1.serialize(&mut &mut buf[..]).is_ok());
+        let obj_page2 = ObjectTablePage::deserialize(&mut (&buf[..])).unwrap();
+        assert_eq!(obj_page1, obj_page2);
     }
 }
