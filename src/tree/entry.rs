@@ -55,7 +55,7 @@ impl Default for Entry {
 }
 
 impl Serialize for Entry {
-    fn serialize(&self, mut writer: &mut [u8]) -> Result<(), TdbError> {
+    fn serialize<W:Write>(&self, writer: &mut W) -> Result<(), TdbError> {
         assert!(self.get_size() < Self::get_maxsize());
         // object info
         writer.write_u64::<LittleEndian>(self.info.clone().into())?;
@@ -72,8 +72,7 @@ impl Serialize for Entry {
 }
 
 impl Deserialize for Entry {
-    fn deserialize(mut reader: &[u8]) -> Result<Self, TdbError> {
-        assert!(reader.len() > Self::get_header_size());
+    fn deserialize<R:Read>(reader: &mut R) -> Result<Self, TdbError> {
         // object info
         let object_info = ObjectInfo::from(reader.read_u64::<LittleEndian>()?);
         // key len
@@ -163,13 +162,13 @@ mod tests {
         // test empty
         let entry0 = Entry::default();
         let mut buf = vec![0; 1024];
-        assert!(entry0.serialize(&mut buf).is_ok());
-        let entry00 = Entry::deserialize(&buf).unwrap();
+        assert!(entry0.serialize(&mut buf.as_mut_slice()).is_ok());
+        let entry00 = Entry::deserialize(&mut buf.as_slice()).unwrap();
         assert_eq!(entry0, entry00);
         // test one
         let entry1 = Entry::new(vec![1, 1, 1], vec![2, 2, 2], 3);
-        assert!(entry1.serialize(&mut buf).is_ok());
-        let entry11 = Entry::deserialize(&buf).unwrap();
+        assert!(entry1.serialize(&mut buf.as_mut_slice()).is_ok());
+        let entry11 = Entry::deserialize(&mut buf.as_slice()).unwrap();
         assert_eq!(entry1, entry11);
         assert_eq!(entry1.get_size(), 8 + 2 + 4 + 3 + 3);
     }
