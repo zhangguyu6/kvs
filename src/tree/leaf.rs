@@ -161,7 +161,7 @@ impl Leaf {
 }
 
 impl Serialize for Leaf {
-    fn serialize(&self, mut writer: &mut [u8]) -> Result<(), TdbError> {
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
         assert!(self.get_size() < Self::get_maxsize());
         // object info
         writer.write_u64::<LittleEndian>(self.info.clone().into())?;
@@ -182,8 +182,7 @@ impl Serialize for Leaf {
 }
 
 impl Deserialize for Leaf {
-    fn deserialize(mut reader: &[u8]) -> Result<Self, TdbError> {
-        assert!(reader.len() > Self::get_header_size());
+    fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
         // object info
         let object_info = ObjectInfo::from(reader.read_u64::<LittleEndian>()?);
         // entrys num
@@ -271,14 +270,14 @@ mod tests {
     fn test_leaf_serialize_deserialize() {
         // test empty serialize
         let leaf = Leaf::default();
-        let mut buf = [0; 4096];
-        assert!(leaf.serialize(&mut buf).is_ok());
-        assert_eq!(leaf, Leaf::deserialize(&buf).unwrap());
+        let mut buf = vec![0; 4096];
+        assert!(leaf.serialize(&mut buf.as_mut_slice()).is_ok());
+        assert_eq!(leaf, Leaf::deserialize(&mut buf.as_slice()).unwrap());
         // test one
         let mut leaf = Leaf::default();
         leaf.insert_non_full(0, vec![0; 40], 0);
-        assert!(leaf.serialize(&mut buf).is_ok());
-        assert_eq!(leaf, Leaf::deserialize(&buf).unwrap());
+        assert!(leaf.serialize(&mut buf.as_mut_slice()).is_ok());
+        assert_eq!(leaf, Leaf::deserialize(&mut buf.as_slice()).unwrap());
         assert_eq!(leaf.get_size(), 8 + 2 + 2 + 40 + 4);
     }
 
@@ -325,5 +324,4 @@ mod tests {
 
     #[test]
     fn test_should() {}
-
 }
