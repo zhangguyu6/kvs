@@ -1,8 +1,8 @@
 use crate::cache::{BackgroundCache, MutObjectCache};
 use crate::error::TdbError;
 use crate::meta::{CheckPoint, ObjectAllocater, ObjectTable};
-use crate::object::{ObjectId,MutObject};
-use crate::storage::{DataLogFile, Dev, MetaLogFile, MetaTableFile};
+use crate::object::{MutObject, ObjectId};
+use crate::storage::{DataLogFileReader, DataLogFilwWriter, Dev, MetaLogFileWriter, MetaTableFile};
 use crate::transaction::{ImmutContext, MutContext, TimeStamp};
 
 use parking_lot::{Mutex, RwLock};
@@ -18,8 +18,12 @@ struct MutInner {
     pub obj_allocater: ObjectAllocater,
     pub dirty_cache: MutObjectCache,
     pub cp: CheckPoint,
-    pub meta_changes: Vec<(ObjectId,MutObject)>,
+    pub meta_changes: Vec<(ObjectId, MutObject)>,
     pub gc_ctx: Vec<(Weak<Context>, Vec<ObjectId>)>,
+    pub data_file_reader: DataLogFileReader,
+    pub data_file_writer: DataLogFilwWriter,
+    pub meta_log_file: MetaLogFileWriter,
+    pub meta_table_file: MetaLogFileWriter,
 }
 
 pub struct DataBase {
@@ -33,7 +37,6 @@ pub struct DataBase {
 }
 
 impl DataBase {
-    
     pub fn open<P: AsRef<Path>>(dir_path: P) -> Result<Self, TdbError> {
         unimplemented!()
     }

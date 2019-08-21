@@ -191,6 +191,10 @@ impl Serialize for Branch {
         for child in self.children.iter() {
             writer.write_u32::<LittleEndian>(*child)?;
         }
+        // fill holy with zero
+        for _ in self.get_size()..MAX_BRANCH_SIZE {
+            writer.write_u8(0)?;
+        }
         Ok(())
     }
 }
@@ -302,7 +306,7 @@ mod tests {
         branch1.keys.push(vec![1, 2, 3]);
         branch1.children.push(2);
         branch1.children.push(3);
-        branch1.info.size += 3 + 2 + 4 + 2;
+        branch1.info.size += 3 + 2 + 4 + 4;
         assert!(branch1.serialize(&mut buf.as_mut_slice()).is_ok());
         let branch11 = Branch::deserialize(&mut buf.as_slice()).unwrap();
         assert_eq!(branch1, branch11);

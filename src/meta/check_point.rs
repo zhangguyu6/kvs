@@ -96,6 +96,22 @@ impl CheckPoint {
     pub fn free_obj(&mut self, obj_pos: &ObjectPos) {
         self.data_log_remove_len += obj_pos.get_len() as u64;
     }
+
+    pub fn check<R: Read>(reader: &mut R) -> Vec<CheckPoint> {
+        let mut result = Vec::new();
+        loop {
+            match CheckPoint::deserialize(reader) {
+                Ok(cp) => {
+                    if cp.meta_log_total_len == 0 {
+                        result.clear();
+                    }
+                    result.push(cp);
+                }
+                Err(_) => break,
+            }
+        }
+        return result;
+    }
 }
 impl Serialize for CheckPoint {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {

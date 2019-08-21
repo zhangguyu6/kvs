@@ -3,7 +3,7 @@ use crate::cache::BackgroundCache;
 use crate::error::TdbError;
 use crate::meta::ObjectTable;
 use crate::object::{Object, ObjectId, UNUSED_OID};
-use crate::storage::DataLogFile;
+use crate::storage::DataLogFileReader;
 use crate::tree::{Branch, Entry, Leaf};
 
 use std::borrow::Borrow;
@@ -17,7 +17,7 @@ pub struct ImmutContext {
     pub root_oid: ObjectId,
     pub obj_table: Arc<ObjectTable>,
     pub cache: BackgroundCache,
-    pub data_file: DataLogFile,
+    pub data_file: DataLogFileReader,
 }
 
 pub struct Iter<'a, K: Borrow<[u8]>> {

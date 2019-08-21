@@ -10,3 +10,4 @@ mod storage;
 mod cache;
 mod object;
 mod meta;
+mod database;

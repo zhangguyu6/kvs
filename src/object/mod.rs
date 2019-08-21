@@ -1,8 +1,7 @@
 mod object_ref;
 mod object_log;
- 
 pub use object_ref::{ObjectRef, Versions};
-
+pub use object_log::ObjectLog;
 use crate::error::TdbError;
 use crate::tree::{Branch, Entry, Leaf};
 use crate::storage::{Serialize,Deserialize};

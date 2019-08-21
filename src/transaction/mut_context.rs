@@ -3,7 +3,7 @@ use crate::cache::{BackgroundCache, MutObjectCache};
 use crate::error::TdbError;
 use crate::meta::{CheckPoint, ObjectAllocater, ObjectTable, OBJECT_TABLE_ENTRY_PRE_PAGE};
 use crate::object::{MutObject, Object, ObjectId, UNUSED_OID};
-use crate::storage::{DataLogFile, MetaLogFile, MetaTableFile};
+use crate::storage::{DataLogFileReader, DataLogFilwWriter, MetaLogFileWriter, MetaTableFile};
 use crate::tree::{Branch, Entry, Key, Leaf, Val, MAX_KEY_LEN};
 use std::borrow::Borrow;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ pub struct MutContext<'a> {
     root_oid: ObjectId,
     obj_modify: ObjectModify<'a>,
     cp: &'a mut CheckPoint,
-    meta_file: MetaLogFile,
+    meta_file: MetaLogFileWriter,
     meta_table_file: MetaTableFile,
 }
 
@@ -22,7 +22,8 @@ struct ObjectModify<'a> {
     obj_table: Arc<ObjectTable>,
     obj_allocater: &'a mut ObjectAllocater,
     dirty_cache: &'a mut MutObjectCache,
-    data_file: DataLogFile,
+    data_file_reader: DataLogFileReader,
+    data_file_writer: DataLogFilwWriter,
 }
 
 impl<'a> ObjectModify<'a> {
@@ -30,7 +31,10 @@ impl<'a> ObjectModify<'a> {
     // try to find object_table if not found
     fn get_ref(&mut self, oid: ObjectId) -> Result<Option<&Object>, TdbError> {
         if !self.dirty_cache.contain(oid) {
-            if let Some(arc_obj) = self.obj_table.get(oid, self.ts, &mut self.data_file)? {
+            if let Some(arc_obj) = self
+                .obj_table
+                .get(oid, self.ts, &mut self.data_file_reader)?
+            {
                 self.dirty_cache.insert(oid, MutObject::Readonly(arc_obj));
             }
         }
@@ -45,7 +49,10 @@ impl<'a> ObjectModify<'a> {
     // Not allow to update removed object
     fn get_mut(&mut self, oid: ObjectId) -> Result<Option<&mut Object>, TdbError> {
         if !self.dirty_cache.contain(oid) {
-            if let Some(arc_obj) = self.obj_table.get(oid, self.ts, &mut self.data_file)? {
+            if let Some(arc_obj) = self
+                .obj_table
+                .get(oid, self.ts, &mut self.data_file_reader)?
+            {
                 self.dirty_cache.insert(oid, MutObject::Readonly(arc_obj));
             }
         }
@@ -73,8 +80,8 @@ impl<'a> ObjectModify<'a> {
                 }
                 // object is on disk, insert remove tag
                 MutObject::Readonly(obj) | MutObject::Dirty(obj) => {
-                    // reuse oid
                     self.dirty_cache.insert(oid, MutObject::Del);
+                    // reuse oid
                     self.obj_allocater.free(oid);
                     Some(obj)
                 }
@@ -101,7 +108,8 @@ impl<'a> ObjectModify<'a> {
         obj.get_object_info_mut().oid = oid;
         if let Some(mut_obj) = self.dirty_cache.remove(oid) {
             match mut_obj {
-                MutObject::Del | MutObject::Dirty(_) => {
+                // object is on disk
+                MutObject::Del | MutObject::Dirty(_) | MutObject::Readonly(_) => {
                     self.dirty_cache
                         .insert(oid, MutObject::Dirty(Arc::new(obj)));
                 }
@@ -637,7 +645,6 @@ impl<'a> MutContext<'a> {
 //         assert!(obj_mod.get_ref(1).is_none());
 //     }
 // }
-
 
 // #[cfg(test)]
 // mod tests {

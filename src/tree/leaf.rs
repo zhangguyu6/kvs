@@ -177,6 +177,9 @@ impl Serialize for Leaf {
             // oid
             writer.write_u32::<LittleEndian>(*oid)?;
         }
+        for _ in self.get_size()..MAX_LEAF_SIZE {
+            writer.write_u8(0)?;
+        }
         Ok(())
     }
 }
