@@ -1,9 +1,13 @@
 // use super::{SegementId, SegementInfo};
 use crate::error::TdbError;
-use crate::object::{Object, ObjectId};
+use crate::object::{Object, ObjectId, UNUSED_OID};
 use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 use std::mem;
+use std::u32;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CheckPoint {
     // current checkpoint size,
     pub check_point_len: u32,
@@ -18,6 +22,26 @@ pub struct CheckPoint {
     // meta file len = allocated_obj_nums * 4096
     pub allocated_obj_nums: u32,
     pub obj_changes: Vec<(ObjectId, Option<ObjectPos>)>,
+}
+
+impl Default for CheckPoint {
+    fn default() -> Self {
+        Self {
+            // current checkpoint size,
+            check_point_len: CheckPoint::min_len() as u32,
+            // crc fast
+            crc: u32::MAX,
+            // for gc
+            data_log_remove_len: 0,
+            data_log_len: 0,
+            root_oid: UNUSED_OID,
+            // meta log area used size, 0 mean meta log is apply
+            meta_log_total_len: 0,
+            // meta file len = allocated_obj_nums * 4096
+            allocated_obj_nums: 0,
+            obj_changes: Vec::with_capacity(0),
+        }
+    }
 }
 
 impl CheckPoint {
@@ -57,6 +81,8 @@ impl CheckPoint {
             + mem::size_of::<u32>()
             // allocated_obj_nums
             + mem::size_of::<u32>()
+              // obj_changes len
+            + mem::size_of::<u32>()
     }
 
     pub fn malloc_obj(&mut self, obj: &Object) -> ObjectPos {
@@ -72,8 +98,7 @@ impl CheckPoint {
     }
 }
 impl Serialize for CheckPoint {
-    fn serialize(&self, mut writer: &mut [u8]) -> Result<(), TdbError> {
-        assert!(writer.len() == self.len());
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
         writer.write_u32::<LittleEndian>(self.check_point_len)?;
         writer.write_u32::<LittleEndian>(self.crc)?;
         writer.write_u64::<LittleEndian>(self.data_log_remove_len)?;
@@ -95,10 +120,15 @@ impl Serialize for CheckPoint {
 }
 
 impl Deserialize for CheckPoint {
-    fn deserialize(mut reader: &[u8]) -> Result<Self, TdbError> {
-        assert!(reader.len() > Self::min_len());
+    fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
         let check_point_len = reader.read_u32::<LittleEndian>()?;
+        if check_point_len == 0 {
+            return Err(TdbError::SerializeError);
+        }
         let crc = reader.read_u32::<LittleEndian>()?;
+        if crc != u32::MAX {
+            return Err(TdbError::SerializeError);
+        }
         let data_log_remove_len = reader.read_u64::<LittleEndian>()?;
         let data_log_len = reader.read_u64::<LittleEndian>()?;
         let root_oid = reader.read_u32::<LittleEndian>()?;
@@ -125,5 +155,33 @@ impl Deserialize for CheckPoint {
             allocated_obj_nums,
             obj_changes,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_checkpoint_size() {
+        let mut cp = CheckPoint::default();
+        assert_eq!(cp.len(), 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4);
+        assert_eq!(cp.len(), CheckPoint::min_len());
+        cp.obj_changes.push((1, None));
+        assert_eq!(cp.len(), CheckPoint::min_len() + 4 + 8);
+    }
+
+    #[test]
+    fn test_cp_serialize_deserialize() {
+        let mut cp0 = CheckPoint::default();
+        let mut buf = [0; 4096];
+        assert!(cp0.serialize(&mut &mut buf[..]).is_ok());
+        let cp1 = CheckPoint::deserialize(&mut &buf[..]).unwrap();
+        assert_eq!(cp0, cp1);
+        assert!(CheckPoint::deserialize(&mut &buf[..8]).is_err());
+        // println!("{:?}", CheckPoint::deserialize(&mut &buf[..8]));
+        cp0.obj_changes.push((1, None));
+        assert!(cp0.serialize(&mut &mut buf[..]).is_ok());
+        let cp1 = CheckPoint::deserialize(&mut &buf[..]).unwrap();
+        assert_eq!(cp0, cp1);
     }
 }
