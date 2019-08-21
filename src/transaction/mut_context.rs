@@ -1,29 +1,34 @@
 use super::TimeStamp;
 use crate::cache::{BackgroundCache, MutObjectCache};
-use crate::meta::{CheckPoint, ObjectAllocater, ObjectTable,OBJECT_TABLE_ENTRY_PRE_PAGE};
-use crate::object::{ObjectId,Object,MutObject,UNUSED_OID};
-use crate::storage::{DataLogFile, MetaLogFile, MetaTableFile};
 use crate::error::TdbError;
-use crate::tree::{Branch, Entry, Leaf,Key,Val,MAX_KEY_LEN};
-use std::sync::Arc;
+use crate::meta::{CheckPoint, ObjectAllocater, ObjectTable, OBJECT_TABLE_ENTRY_PRE_PAGE};
+use crate::object::{MutObject, Object, ObjectId, UNUSED_OID};
+use crate::storage::{DataLogFile, MetaLogFile, MetaTableFile};
+use crate::tree::{Branch, Entry, Key, Leaf, Val, MAX_KEY_LEN};
 use std::borrow::Borrow;
+use std::sync::Arc;
 
 pub struct MutContext<'a> {
-    pub ts: TimeStamp,
-    pub root_oid: ObjectId,
-    pub obj_table: Arc<ObjectTable>,
-    pub obj_allocater: &'a mut ObjectAllocater,
-    pub dirty_cache: &'a mut MutObjectCache,
-    pub cp: &'a mut CheckPoint,
-    pub data_file: DataLogFile,
-    pub meta_file: MetaLogFile,
-    pub meta_table_file: MetaTableFile,
+    ts: TimeStamp,
+    root_oid: ObjectId,
+    obj_modify: ObjectModify<'a>,
+    cp: &'a mut CheckPoint,
+    meta_file: MetaLogFile,
+    meta_table_file: MetaTableFile,
 }
 
-impl<'a> MutContext<'a> {
+struct ObjectModify<'a> {
+    ts: TimeStamp,
+    obj_table: Arc<ObjectTable>,
+    obj_allocater: &'a mut ObjectAllocater,
+    dirty_cache: &'a mut MutObjectCache,
+    data_file: DataLogFile,
+}
+
+impl<'a> ObjectModify<'a> {
     // Return reference of New/Insert/Ondisk object, None for del object
     // try to find object_table if not found
-    fn get_oid_ref(&mut self, oid: ObjectId) -> Result<Option<&Object>, TdbError >{
+    fn get_ref(&mut self, oid: ObjectId) -> Result<Option<&Object>, TdbError> {
         if !self.dirty_cache.contain(oid) {
             if let Some(arc_obj) = self.obj_table.get(oid, self.ts, &mut self.data_file)? {
                 self.dirty_cache.insert(oid, MutObject::Readonly(arc_obj));
@@ -38,9 +43,9 @@ impl<'a> MutContext<'a> {
     }
     // Return mut reference of New/Insert/Ondisk object
     // Not allow to update removed object
-    fn get_oid_mut(&mut self, oid: ObjectId) ->Result<Option<&mut Object>, TdbError>{
+    fn get_mut(&mut self, oid: ObjectId) -> Result<Option<&mut Object>, TdbError> {
         if !self.dirty_cache.contain(oid) {
-            if let Some(arc_obj) = self.obj_table.get(oid, self.ts,  &mut self.data_file)? {
+            if let Some(arc_obj) = self.obj_table.get(oid, self.ts, &mut self.data_file)? {
                 self.dirty_cache.insert(oid, MutObject::Readonly(arc_obj));
             }
         }
@@ -52,7 +57,7 @@ impl<'a> MutContext<'a> {
         Ok(None)
     }
     // Insert Del tag if object is ondisk, otherwise just remove it
-    fn remove_oid(&mut self, oid: ObjectId) -> Option<Arc<Object>> {
+    fn remove(&mut self, oid: ObjectId) -> Option<Arc<Object>> {
         if let Some(mut_obj) = self.dirty_cache.remove(oid) {
             match mut_obj {
                 // object is del, do nothing
@@ -82,55 +87,65 @@ impl<'a> MutContext<'a> {
     }
 
     // Insert New object to dirty cache and Return allocated oid
-    fn insert_oid(&mut self, mut obj: Object) -> ObjectId {
+    fn insert(&mut self, mut obj: Object) -> ObjectId {
         let oid = match self.obj_allocater.allocate() {
             Some(oid) => oid,
             None => {
                 self.obj_allocater.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
                 self.obj_table.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
-                self.obj_allocater.allocate().unwrap()
+                self.obj_allocater
+                    .allocate()
+                    .expect("no enough oid for object")
             }
         };
         obj.get_object_info_mut().oid = oid;
         if let Some(mut_obj) = self.dirty_cache.remove(oid) {
             match mut_obj {
-                MutObject::Del | MutObject::Dirty(_) => {self.dirty_cache.insert(oid, MutObject::Dirty(Arc::new(obj)));},
-                _ => { self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));}
+                MutObject::Del | MutObject::Dirty(_) => {
+                    self.dirty_cache
+                        .insert(oid, MutObject::Dirty(Arc::new(obj)));
+                }
+                _ => {
+                    self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));
+                }
             }
         } else {
             self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));
         }
         oid
     }
+}
 
-    pub fn insert<K: Into<Key>, V: Into<Val>>(&mut self, key: K, val: V) -> Result<(),TdbError> {
+impl<'a> MutContext<'a> {
+    pub fn insert<K: Into<Key>, V: Into<Val>>(&mut self, key: K, val: V) -> Result<(), TdbError> {
         let key: Key = key.into();
         assert!(key.len() <= MAX_KEY_LEN);
         let val: Val = val.into();
-        if let Some(oid) = self.get_oid(&key) {
+        if let Some(oid) = self.get_oid(&key)? {
             // make oid dirty
-            if let Some(obj_mut) = self.get_oid_mut(oid)? {
-            assert!(obj_mut.is::<Entry>());
-            let entry_mut = obj_mut.get_mut::<Entry>();
-            assert!(entry_mut.key == key);
-            entry_mut.update(val);
-            return Ok(());
+            if let Some(obj_mut) = self.obj_modify.get_mut(oid)? {
+                assert!(obj_mut.is::<Entry>());
+                let entry_mut = obj_mut.get_mut::<Entry>();
+                assert!(entry_mut.key == key);
+                entry_mut.update(val);
+                return Ok(());
+            } else {
+                return Err(TdbError::NotFindObject);
             }
-            else {return Err(TdbError::NotFindObject);}
         } else {
             // create empty leaf if tree is empty
             if self.root_oid == UNUSED_OID {
                 let new_leaf = Leaf::default();
-                self.root_oid = self.insert_oid(Object::L(new_leaf));
+                self.root_oid = self.obj_modify.insert(Object::L(new_leaf));
             }
             let mut current_oid = self.root_oid;
             let mut current_index = 0;
             let mut parent_oid = self.root_oid;
             // allocate new node
             let entry_obj = Object::E(Entry::new(key.clone(), val, UNUSED_OID));
-            let entry_oid = self.insert_oid(entry_obj);
+            let entry_oid = self.obj_modify.insert(entry_obj);
             loop {
-                let current_obj = match self.get_oid_ref(current_oid)? {
+                let current_obj = match self.obj_modify.get_ref(current_oid)? {
                     Some(obj) => obj,
                     None => return Err(TdbError::NotFindObject),
                 };
@@ -139,7 +154,8 @@ impl<'a> MutContext<'a> {
                     Object::E(_) => unreachable!(),
                     Object::L(_) => {
                         let obj_mut = self
-                            .get_oid_mut(current_oid)?
+                            .obj_modify
+                            .get_mut(current_oid)?
                             .unwrap()
                             .get_mut::<Leaf>();
                         let insert_index = obj_mut.search(&key).unwrap_err();
@@ -147,16 +163,17 @@ impl<'a> MutContext<'a> {
                         // split if leaf is full
                         if obj_mut.should_split() {
                             let (split_key, new_leaf) = obj_mut.split();
-                            let new_leaf_oid = self.insert_oid(Object::L(new_leaf));
+                            let new_leaf_oid = self.obj_modify.insert(Object::L(new_leaf));
                             // leaf is root
                             if current_oid == self.root_oid {
                                 let branch = Branch::new(split_key, current_oid, new_leaf_oid);
-                                self.root_oid = self.insert_oid(Object::B(branch));
+                                self.root_oid = self.obj_modify.insert(Object::B(branch));
                             }
                             // insert parent branch
                             else {
                                 let parent_branch = self
-                                    .get_oid_mut(parent_oid)?
+                                    .obj_modify
+                                    .get_mut(parent_oid)?
                                     .unwrap()
                                     .get_mut::<Branch>();
                                 parent_branch.insert_non_full(
@@ -172,7 +189,7 @@ impl<'a> MutContext<'a> {
                         if branch.should_split() {
                             let obj_mut = self
                                 .obj_modify
-                                .get_mut(current_oid)
+                                .get_mut(current_oid)?
                                 .unwrap()
                                 .get_mut::<Branch>();
                             let (split_key, new_branch) = obj_mut.split();
@@ -188,7 +205,7 @@ impl<'a> MutContext<'a> {
                             else {
                                 let parent_branch = self
                                     .obj_modify
-                                    .get_mut(parent_oid)
+                                    .get_mut(parent_oid)?
                                     .unwrap()
                                     .get_mut::<Branch>();
                                 parent_branch.insert_non_full(
@@ -216,19 +233,22 @@ impl<'a> MutContext<'a> {
         }
     }
 
-    pub fn remove<K: Borrow<[u8]>>(&mut self, key: &K) -> Option<(Key, ObjectId)> {
-        if let Some(entry_oid) = self.get_oid(key) {
+    pub fn remove<K: Borrow<[u8]>>(
+        &mut self,
+        key: &K,
+    ) -> Result<Option<(Key, ObjectId)>, TdbError> {
+        if let Some(entry_oid) = self.get_oid(key)? {
             let mut current_oid = self.root_oid;
             let mut current_index = 0;
             let mut parent_oid = self.root_oid;
             loop {
-                let current_obj = self.obj_modify.get_ref(current_oid).unwrap();
+                let current_obj = self.obj_modify.get_ref(current_oid)?.unwrap();
                 match current_obj {
                     Object::E(_) => unreachable!(),
                     Object::L(_) => {
                         let obj_mut = self
                             .obj_modify
-                            .get_mut(current_oid)
+                            .get_mut(current_oid)?
                             .unwrap()
                             .get_mut::<Leaf>();
                         // remove entry
@@ -237,12 +257,12 @@ impl<'a> MutContext<'a> {
                         if obj_mut.should_rebalance_merge() {
                             // leaf is root, don't merge
                             if self.root_oid == current_oid {
-                                return result;
+                                return Ok(result);
                             }
                             // leaf is not root
                             let parent_branch = self
                                 .obj_modify
-                                .get_ref(parent_oid)
+                                .get_ref(parent_oid)?
                                 .unwrap()
                                 .get_ref::<Branch>();
                             // use next obj to rebalance or merge
@@ -252,13 +272,13 @@ impl<'a> MutContext<'a> {
                                 unsafe {
                                     let next_leaf_ptr = self
                                         .obj_modify
-                                        .get_mut(next_oid)
+                                        .get_mut(next_oid)?
                                         .unwrap()
                                         .get_mut::<Leaf>()
                                         as *mut _;
                                     let current_leaf_ptr = self
                                         .obj_modify
-                                        .get_mut(current_oid)
+                                        .get_mut(current_oid)?
                                         .unwrap()
                                         .get_mut::<Leaf>()
                                         as *mut _;
@@ -271,7 +291,7 @@ impl<'a> MutContext<'a> {
                                         self.obj_modify.remove(next_oid);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         //  remove next oid in parent
@@ -295,7 +315,7 @@ impl<'a> MutContext<'a> {
                                         let new_key = current_leaf_mut.rebalance(next_leaf_mut);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         // change key
@@ -310,13 +330,13 @@ impl<'a> MutContext<'a> {
                                 unsafe {
                                     let prev_leaf_ptr = self
                                         .obj_modify
-                                        .get_mut(prev_oid)
+                                        .get_mut(prev_oid)?
                                         .unwrap()
                                         .get_mut::<Leaf>()
                                         as *mut _;
                                     let current_leaf_ptr = self
                                         .obj_modify
-                                        .get_mut(current_oid)
+                                        .get_mut(current_oid)?
                                         .unwrap()
                                         .get_mut::<Leaf>()
                                         as *mut _;
@@ -329,7 +349,7 @@ impl<'a> MutContext<'a> {
                                         self.obj_modify.remove(current_oid);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         //  remove current oid in parent
@@ -357,7 +377,7 @@ impl<'a> MutContext<'a> {
                                         let new_key = prev_leaf_mut.rebalance(current_leaf_mut);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         // change key
@@ -366,7 +386,7 @@ impl<'a> MutContext<'a> {
                                 }
                             }
                         }
-                        return result;
+                        return Ok(result);
                     }
                     Object::B(branch) => {
                         // leaf is root, don't merge
@@ -374,7 +394,7 @@ impl<'a> MutContext<'a> {
                             // leaf is not root
                             let parent_branch = self
                                 .obj_modify
-                                .get_ref(parent_oid)
+                                .get_ref(parent_oid)?
                                 .unwrap()
                                 .get_ref::<Branch>();
 
@@ -383,13 +403,13 @@ impl<'a> MutContext<'a> {
                                 unsafe {
                                     let next_branch_ptr = self
                                         .obj_modify
-                                        .get_mut(next_oid)
+                                        .get_mut(next_oid)?
                                         .unwrap()
                                         .get_mut::<Branch>()
                                         as *mut _;
                                     let current_branch_ptr = self
                                         .obj_modify
-                                        .get_mut(current_oid)
+                                        .get_mut(current_oid)?
                                         .unwrap()
                                         .get_mut::<Branch>()
                                         as *mut _;
@@ -400,7 +420,7 @@ impl<'a> MutContext<'a> {
                                         let next_branch_mut = &mut *next_branch_ptr;
                                         let next_key = self
                                             .obj_modify
-                                            .get_ref(next_branch_mut.children[0])
+                                            .get_ref(next_branch_mut.children[0])?
                                             .unwrap()
                                             .get_key()
                                             .to_vec();
@@ -409,7 +429,7 @@ impl<'a> MutContext<'a> {
                                         self.obj_modify.remove(next_oid);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         //  remove next oid in parent
@@ -434,7 +454,7 @@ impl<'a> MutContext<'a> {
                                         let next_branch_mut = &mut *next_branch_ptr;
                                         let next_key = self
                                             .obj_modify
-                                            .get_ref(next_branch_mut.children[0])
+                                            .get_ref(next_branch_mut.children[0])?
                                             .unwrap()
                                             .get_key()
                                             .to_vec();
@@ -442,7 +462,7 @@ impl<'a> MutContext<'a> {
                                             current_branch_mut.rebalance(next_branch_mut, next_key);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         if new_key.as_slice() <= key.borrow() {
@@ -461,13 +481,13 @@ impl<'a> MutContext<'a> {
                                 unsafe {
                                     let prev_branch_ptr = self
                                         .obj_modify
-                                        .get_mut(prev_oid)
+                                        .get_mut(prev_oid)?
                                         .unwrap()
                                         .get_mut::<Branch>()
                                         as *mut _;
                                     let current_branch_ptr = self
                                         .obj_modify
-                                        .get_mut(current_oid)
+                                        .get_mut(current_oid)?
                                         .unwrap()
                                         .get_mut::<Branch>()
                                         as *mut _;
@@ -478,7 +498,7 @@ impl<'a> MutContext<'a> {
                                         let current_branch_mut = &mut *current_branch_ptr;
                                         let next_key = self
                                             .obj_modify
-                                            .get_ref(current_branch_mut.children[0])
+                                            .get_ref(current_branch_mut.children[0])?
                                             .unwrap()
                                             .get_key()
                                             .to_vec();
@@ -487,7 +507,7 @@ impl<'a> MutContext<'a> {
                                         self.obj_modify.remove(current_oid);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         //  remove cur oid in parent
@@ -514,7 +534,7 @@ impl<'a> MutContext<'a> {
                                         let current_branch_mut = &mut *current_branch_ptr;
                                         let next_key = self
                                             .obj_modify
-                                            .get_ref(current_branch_mut.children[0])
+                                            .get_ref(current_branch_mut.children[0])?
                                             .unwrap()
                                             .get_key()
                                             .to_vec();
@@ -522,7 +542,7 @@ impl<'a> MutContext<'a> {
                                             prev_branch_mut.rebalance(current_branch_mut, next_key);
                                         let parent_branch_mut = self
                                             .obj_modify
-                                            .get_mut(parent_oid)
+                                            .get_mut(parent_oid)?
                                             .unwrap()
                                             .get_mut::<Branch>();
                                         if new_key.as_slice() > key.borrow() {
@@ -544,23 +564,26 @@ impl<'a> MutContext<'a> {
                 }
             }
         } else {
-            None
+            Ok(None)
         }
     }
 
-    pub fn get_oid<K: Borrow<[u8]>>(&mut self, key: &K) -> Option<ObjectId> {
+    pub fn get_oid<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<ObjectId>, TdbError> {
         // tree is empty
         if self.root_oid == UNUSED_OID {
-            return None;
+            return Ok(None);
         }
         let mut current_oid = self.root_oid;
         loop {
-            let current_obj = self.obj_modify.get_ref(current_oid).unwrap();
+            let current_obj = self
+                .obj_modify
+                .get_ref(current_oid)?
+                .ok_or(TdbError::NotFindObject)?;
             match current_obj {
                 Object::E(_) => unreachable!(),
                 Object::L(leaf) => match leaf.search(key) {
-                    Ok(oid) => return Some(oid),
-                    Err(_) => return None,
+                    Ok(oid) => return Ok(Some(oid)),
+                    Err(_) => return Ok(None),
                 },
                 Object::B(branch) => {
                     let (oid, _) = branch.search(key);
@@ -570,15 +593,158 @@ impl<'a> MutContext<'a> {
         }
     }
 
-    pub fn get<K: Borrow<[u8]>>(&mut self, key: &K) -> Option<&Entry> {
-        if let Some(oid) = self.get_oid(key) {
-            self.obj_modify
-                .get_ref(oid)
-                .map(|obj| obj.get_ref::<Entry>())
+    pub fn get<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<&Entry>, TdbError> {
+        if let Some(oid) = self.get_oid(key)? {
+            Ok(self
+                .obj_modify
+                .get_ref(oid)?
+                .map(|obj| obj.get_ref::<Entry>()))
         } else {
-            None
+            Ok(None)
         }
     }
-
-
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::cache::MutObjectCache;
+//     use crate::object::*;
+//     use crate::storage::Dummy;
+//     use crate::tree::Entry;
+//     #[test]
+//     fn test_object_modify() {
+//         let dummy = Dummy {};
+//         let dev = BlockDev::new(dummy);
+//         let obj_table = ObjectTable::with_capacity(1 << 16);
+//         let mut obj_allocater = ObjectAllocater::with_capacity(1 << 16);
+//         let mut cache = MutObjectCache::with_capacity(512);
+//         let mut obj_mod = ObjectModify {
+//             ts: 0,
+//             dev: &dev,
+//             obj_table: &obj_table,
+//             obj_allocater: &mut obj_allocater,
+//             dirty_cache: &mut cache,
+//         };
+//         assert_eq!(obj_mod.insert(Object::E(Entry::default())), 0);
+//         assert!(obj_mod.get_ref(0).is_some());
+//         obj_mod.get_mut(0).unwrap().get_mut::<Entry>().key = vec![1];
+//         assert_eq!(obj_mod.get_ref(0).unwrap().get_ref::<Entry>().key, vec![1]);
+//         assert!(obj_mod.dirty_cache.get_mut(0).unwrap().is_new());
+//         assert!(obj_mod.remove(0).is_some());
+//         assert!(obj_mod.dirty_cache.insert(1, MutObject::Del).is_none());
+//         assert!(obj_mod.get_ref(0).is_none());
+//         assert!(obj_mod.get_ref(1).is_none());
+//     }
+// }
+
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use crate::cache::MutObjectCache;
+//     use crate::meta::ObjectTable;
+//     use crate::object::*;
+//     use crate::storage::{BlockDev, Dummy};
+//     #[test]
+//     fn test_tree_writer() {
+//         let dummy = Dummy {};
+//         let dev = BlockDev::new(dummy);
+//         let obj_table = ObjectTable::with_capacity(1 << 16);
+//         let mut obj_allocater = ObjectAllocater::with_capacity(1 << 16);
+//         let mut cache = MutObjectCache::with_capacity(512);
+//         let mut obj_mod = ObjectModify {
+//             ts: 0,
+//             dev: &dev,
+//             obj_table: &obj_table,
+//             obj_allocater: &mut obj_allocater,
+//             dirty_cache: &mut cache,
+//         };
+//         let mut tree_writer = TreeWriter {
+//             obj_modify: obj_mod,
+//             root_oid: UNUSED_OID,
+//         };
+//         tree_writer.insert(vec![0; 255], vec![1]);
+//         assert_eq!(tree_writer.get(&vec![0; 255]).unwrap().val, vec![1]);
+//         assert_eq!(tree_writer.remove(&vec![0; 255]), Some((vec![0; 255], 1)));
+//         assert_eq!(tree_writer.get(&vec![0; 255]), None);
+
+//         for i in 0..255 {
+//             tree_writer.insert(vec![i; 255], vec![i]);
+//         }
+//         for i in 0..255 {
+//             assert_eq!(tree_writer.get(&vec![i; 255]).unwrap().val, vec![i]);
+//         }
+
+//         for i in 0..255 {
+//             tree_writer.remove(&vec![i; 255]);
+//         }
+
+//         for i in 0..255 {
+//             assert_eq!(tree_writer.get(&vec![i; 255]), None);
+//         }
+
+//         for i in 0..255 {
+//             tree_writer.insert(vec![i; 255], vec![i]);
+//         }
+
+//         for i in (0..255).rev() {
+//             tree_writer.remove(&vec![i; 255]);
+//         }
+
+//         for i in 0..255 {
+//             assert_eq!(tree_writer.get(&vec![i; 255]), None);
+//         }
+
+//         for i in 0..255 {
+//             for j in 0..255 {
+//                 let mut key = vec![j; 255];
+//                 key[0] = i;
+//                 let val = vec![i, j];
+//                 tree_writer.insert(key, val);
+//             }
+//         }
+
+//         for i in 0..255 {
+//             for j in 0..255 {
+//                 let mut key = vec![j; 255];
+//                 key[0] = i;
+//                 tree_writer.remove(&key);
+//             }
+//         }
+
+//         for i in 0..255 {
+//             for j in 0..255 {
+//                 let mut key = vec![j; 255];
+//                 key[0] = i;
+//                 assert_eq!(tree_writer.get(&key), None);
+//             }
+//         }
+
+//         for i in 0..255 {
+//             for j in 0..255 {
+//                 let mut key = vec![j; 255];
+//                 key[0] = i;
+//                 let val = vec![i, j];
+//                 tree_writer.insert(key, val);
+//             }
+//         }
+
+//         for i in 0..255 {
+//             for j in 0..255 {
+//                 let mut key = vec![j; 255];
+//                 key[0] = i;
+//                 tree_writer.remove(&key);
+//             }
+//         }
+
+//         for i in (0..255).rev() {
+//             for j in (0..255).rev() {
+//                 let mut key = vec![j; 255];
+//                 key[0] = i;
+//                 assert_eq!(tree_writer.get(&key), None);
+//             }
+//         }
+//         println!("{:?}", tree_writer.root_oid);
+//     }
+// }
