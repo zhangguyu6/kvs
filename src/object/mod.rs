@@ -9,7 +9,7 @@ use crate::storage::{Serialize,Deserialize};
 use std::mem;
 use std::sync::Arc;
 use std::u32;
-
+use std::io::{Read,Write};
 // Entry less than 2M
 pub const OBJECT_MAX_SIZE: usize = (1 << 21) as usize;
 pub const UNUSED_OID: u32 = u32::MAX;
@@ -64,7 +64,7 @@ impl Object {
         }
     }
     #[inline]
-    pub fn read(buf: &[u8], obj_tag: &ObjectTag) -> Result<Self, TdbError> {
+    pub fn read<R:Read>(buf: &mut R, obj_tag: &ObjectTag) -> Result<Self, TdbError> {
         match obj_tag {
             ObjectTag::Leaf => Ok(Object::L(Leaf::deserialize(buf)?)),
             ObjectTag::Branch => Ok(Object::B(Branch::deserialize(buf)?)),
@@ -72,7 +72,7 @@ impl Object {
         }
     }
     #[inline]
-    pub fn write(&self, buf: &mut [u8]) -> Result<(), TdbError> {
+    pub fn write<W:Write>(&self, buf: &mut W) -> Result<(), TdbError> {
         match self {
             Object::L(leaf) => leaf.serialize(buf),
             Object::B(branch) => branch.serialize(buf),
