@@ -3,9 +3,10 @@ use crate::cache::{BackgroundCache, MutObjectCache};
 use crate::error::TdbError;
 use crate::meta::{CheckPoint, ObjectAllocater, ObjectTable, OBJECT_TABLE_ENTRY_PRE_PAGE};
 use crate::object::{MutObject, Object, ObjectId, UNUSED_OID};
-use crate::storage::{DataLogFileReader, DataLogFilwWriter, MetaLogFileWriter, MetaTableFile};
+use crate::storage::{DataLogFileReader, DataLogFilwWriter, MetaLogFileWriter, MetaTableFileWriter};
 use crate::tree::{Branch, Entry, Key, Leaf, Val, MAX_KEY_LEN};
 use std::borrow::Borrow;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 pub struct MutContext<'a> {
@@ -13,8 +14,10 @@ pub struct MutContext<'a> {
     root_oid: ObjectId,
     obj_modify: ObjectModify<'a>,
     cp: &'a mut CheckPoint,
-    meta_file: MetaLogFileWriter,
-    meta_table_file: MetaTableFile,
+    meta_log_file: MetaLogFileWriter,
+    meta_table_file: MetaTableFileWriter,
+    gc_oids: Vec<ObjectId>,
+    dirty_pages: &'a mut BTreeSet<u32>,
 }
 
 struct ObjectModify<'a> {
