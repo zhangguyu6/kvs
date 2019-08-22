@@ -12,14 +12,17 @@ use std::path::{Path, PathBuf};
 pub const META_LOG_FILE_MAX_SIZE: usize = 1 << 21;
 
 pub struct Dev {
-    dir_path: PathBuf,
-    meta_table_path: PathBuf,
-    meta_log_file_path: PathBuf,
-    data_log_file_path: PathBuf,
+    pub dir_path: PathBuf,
+    pub meta_table_path: PathBuf,
+    pub meta_table_file: File,
+    pub meta_log_file_path: PathBuf,
+    pub meta_log_file: File,
+    pub data_log_file_path: PathBuf,
+    pub data_log_file: File,
 }
 
 impl Dev {
-    fn open<P: AsRef<Path>>(dir_path: P) -> Result<(Self, Vec<CheckPoint>), TdbError> {
+    pub fn open<P: AsRef<Path>>(dir_path: P) -> Result<Self, TdbError> {
         let dir_path = PathBuf::from(dir_path.as_ref());
         let mut options = fs::OpenOptions::new();
         let options_mut = options.create(true).read(true).write(true).append(true);
@@ -28,21 +31,19 @@ impl Dev {
         let meta_table_file = options_mut.open(&meta_table_path)?;
         let mut meta_log_file_path = PathBuf::from(&dir_path);
         meta_log_file_path.push("meta_log_file.db");
-        let mut meta_log_file = options_mut.open(&meta_log_file_path)?;
+        let meta_log_file = options_mut.open(&meta_log_file_path)?;
         let mut data_log_file_path = PathBuf::from(&dir_path);
         data_log_file_path.push("data_log_file.db");
-        let mut data_log_file = options_mut.open(&data_log_file_path)?;
-        meta_log_file.seek(SeekFrom::Start(0))?;
-        let cps = CheckPoint::check(&mut BufReader::with_capacity(4096 * 4, meta_log_file));
-        Ok((
-            Dev {
-                dir_path,
-                meta_table_path,
-                meta_log_file_path,
-                data_log_file_path,
-            },
-            cps,
-        ))
+        let data_log_file = options_mut.open(&data_log_file_path)?;
+        Ok(Dev {
+            dir_path,
+            meta_table_path,
+            meta_table_file,
+            meta_log_file_path,
+            meta_log_file,
+            data_log_file_path,
+            data_log_file,
+        })
     }
 }
 
@@ -53,13 +54,13 @@ impl Dev {
     // }
 }
 
-pub struct MetaTableFile {
+pub struct MetaTableFileWriter {
     reader: BufReader<File>,
     writer: BufWriter<File>,
     size: usize,
 }
 
-impl MetaTableFile {
+impl MetaTableFileWriter {
     pub fn read_page(&mut self, page_id: u32) -> Result<ObjectTablePage, TdbError> {
         self.reader.seek(SeekFrom::Start(
             page_id as u64 * OBJECT_TABLE_PAGE_SIZE as u64,
