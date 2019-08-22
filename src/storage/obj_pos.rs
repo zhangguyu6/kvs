@@ -1,4 +1,4 @@
-use crate::object::ObjectTag;
+use crate::object::{ObjectInfo, ObjectTag};
 use std::io::SeekFrom;
 use std::u64;
 // [20~63)
@@ -21,6 +21,12 @@ impl ObjectPos {
     pub fn new(pos: u64, len: u16, tag: ObjectTag) -> Self {
         let tag: u8 = tag.into();
         Self((pos << 20) + ((len as u64) << 4) + tag as u64)
+    }
+
+    pub fn from_info(pos: u64, obj_info: &ObjectInfo) -> Self {
+        let len = obj_info.size as u16;
+        let tag = obj_info.tag;
+        Self::new(pos, len, tag)
     }
 
     #[inline]

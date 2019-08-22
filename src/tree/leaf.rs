@@ -1,17 +1,15 @@
 use super::{Key, MAX_KEY_LEN};
 use crate::error::TdbError;
 use crate::object::{AsObject, Object, ObjectId, ObjectInfo, ObjectTag, UNUSED_OID};
-use crate::storage::{Deserialize, Serialize};
+use crate::storage::{Deserialize, Serialize, StaticSized};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
 use std::mem;
-use std::u16;
-
 const MAX_LEAF_SIZE: usize = 4096;
 // key + key len + nodeid
 const MAX_NONSPLIT_LEAF_SIZE: usize =
-    MAX_LEAF_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() - mem::size_of::<u16>();
+    MAX_LEAF_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() - mem::size_of::<u8>();
 
 const REBALANCE_LEAF_SIZE: usize = MAX_LEAF_SIZE / 4;
 
@@ -59,7 +57,7 @@ impl Leaf {
     }
     // Insert object to non-full leaf, leaf must be dirty before insert
     pub fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
-        self.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+        self.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
         self.entrys.insert(index, (key, oid));
     }
 
@@ -72,7 +70,7 @@ impl Leaf {
             Ok(index) => {
                 // println!("{:?} {:?} ", self, key.borrow());
                 self.info.size -=
-                    key.borrow().len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+                    key.borrow().len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
                 Some(self.entrys.remove(index))
             }
             Err(_) => None,
@@ -87,12 +85,11 @@ impl Leaf {
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
         for i in 0..self.entrys.len() {
-            left_size +=
-                self.entrys[i].0.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            left_size += self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             split_index = i;
             if left_size > MAX_LEAF_SIZE / 2 {
                 left_size -=
-                    self.entrys[i].0.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+                    self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
                 break;
             }
         }
@@ -122,12 +119,11 @@ impl Leaf {
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
         for i in 0..self.entrys.len() {
-            left_size +=
-                self.entrys[i].0.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            left_size += self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             split_index = i;
             if left_size > MAX_LEAF_SIZE / 2 {
                 left_size -=
-                    self.entrys[i].0.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();;
+                    self.entrys[i].0.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();;
                 break;
             }
         }
@@ -160,24 +156,32 @@ impl Leaf {
     }
 }
 
+impl StaticSized for Leaf {
+    fn len(&self) -> usize {
+        self.info.size
+    }
+    fn static_size(&self) -> usize {
+        MAX_LEAF_SIZE
+    }
+}
+
 impl Serialize for Leaf {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
-        assert!(self.get_size() < Self::get_maxsize());
         // object info
         writer.write_u64::<LittleEndian>(self.info.clone().into())?;
-        assert!(self.entrys.len() < u16::MAX as usize);
         // entrys num
         writer.write_u16::<LittleEndian>(self.entrys.len() as u16)?;
         // entrys
         for (key, oid) in self.entrys.iter() {
             // key len
-            writer.write_u16::<LittleEndian>(key.len() as u16)?;
+            writer.write_u8(key.len() as u8)?;
             // key
             writer.write(&key)?;
             // oid
             writer.write_u32::<LittleEndian>(*oid)?;
         }
-        for _ in self.get_size()..MAX_LEAF_SIZE {
+        // fill hole
+        for _ in self.len()..MAX_LEAF_SIZE {
             writer.write_u8(0)?;
         }
         Ok(())
@@ -193,7 +197,7 @@ impl Deserialize for Leaf {
         let mut entrys = Vec::with_capacity(entrys_len);
         // entrys
         for _ in 0..entrys_len {
-            let key_len: usize = reader.read_u16::<LittleEndian>()? as usize;
+            let key_len: usize = reader.read_u8()? as usize;
             let mut key = vec![0; key_len];
             reader.read_exact(&mut key)?;
             let oid = reader.read_u32::<LittleEndian>()? as ObjectId;
@@ -256,14 +260,6 @@ impl AsObject for Leaf {
         // object_info + entry num
         ObjectInfo::static_size() + mem::size_of::<u16>()
     }
-    #[inline]
-    fn get_size(&self) -> usize {
-        self.info.size
-    }
-    #[inline]
-    fn get_maxsize() -> usize {
-        MAX_LEAF_SIZE
-    }
 }
 
 #[cfg(test)]
@@ -281,7 +277,7 @@ mod tests {
         leaf.insert_non_full(0, vec![0; 40], 0);
         assert!(leaf.serialize(&mut buf.as_mut_slice()).is_ok());
         assert_eq!(leaf, Leaf::deserialize(&mut buf.as_slice()).unwrap());
-        assert_eq!(leaf.get_size(), 8 + 2 + 2 + 40 + 4);
+        assert_eq!(leaf.len(), 8 + 2 + 1 + 40 + 4);
     }
 
     #[test]
@@ -299,12 +295,12 @@ mod tests {
         for i in 0..100 {
             leaf.insert_non_full(i, vec![i as u8; 40], i as u32);
         }
-        assert_eq!(leaf.get_size(), 8 + 2 + 100 * 2 + 100 * 40 + 100 * 4);
+        assert_eq!(leaf.len(), 8 + 2 + 100 * 1 + 100 * 40 + 100 * 4);
         assert!(leaf.should_split());
         let mut leaf1 = leaf.clone();
         let (key, mut leaf11) = leaf1.split();
-        assert_eq!(key, vec![44; 40]);
-        assert_eq!(leaf1.get_size(), 8 + 2 + 44 * 46);
+        assert_eq!(key, vec![45; 40]);
+        assert_eq!(leaf1.len(), 8 + 2 + 45 * 45);
         leaf1.merge(&mut leaf11);
         assert_eq!(leaf, leaf1);
     }
@@ -321,10 +317,8 @@ mod tests {
         }
         assert!(Leaf::should_rebalance(&leaf0, &leaf1));
         let key = leaf0.rebalance(&mut leaf1);
-        assert_eq!(key, vec![44; 40]);
-        assert_eq!(leaf0.get_size(), 8 + 2 + 44 * 46);
+        assert_eq!(key, vec![45; 40]);
+        assert_eq!(leaf0.len(), 8 + 2 + 45 * 45);
     }
 
-    #[test]
-    fn test_should() {}
 }

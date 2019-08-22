@@ -1,17 +1,13 @@
-use super::{Key, Val};
+use super::{Key, Val, MAX_KEY_LEN};
 use crate::error::TdbError;
-use crate::object::{
-    AsObject, Object, ObjectId, ObjectInfo, ObjectTag,
-    UNUSED_OID,
-};
-use crate::storage::{Deserialize,Serialize,MAX_OBJECT_SIZE};
+use crate::object::{AsObject, Object, ObjectId, ObjectInfo, ObjectTag, UNUSED_OID};
+use crate::storage::{Deserialize, Serialize, StaticSized, MAX_OBJECT_SIZE};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::convert::TryInto;
 use std::io::{Read, Write};
 use std::mem;
-use std::u16;
 
-const MAX_ENTRY_SIZE: usize = MAX_OBJECT_SIZE as usize ;
+const MAX_ENTRY_SIZE: usize = MAX_OBJECT_SIZE as usize;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Entry {
@@ -22,7 +18,10 @@ pub struct Entry {
 
 impl Entry {
     pub fn new(key: Key, val: Val, oid: ObjectId) -> Self {
-        let size = Self::get_header_size() + key.len() + val.len();
+        assert!(key.len() <= MAX_KEY_LEN);
+        let size = Self::get_header_size()
+            + key.len()
+            + val.len();
         Self {
             key: key,
             val: val,
@@ -33,12 +32,12 @@ impl Entry {
             },
         }
     }
-    pub fn update(&mut self,val:Val) {
+    pub fn update(&mut self, val: Val) {
         self.info.size -= self.val.len();
         self.info.size += val.len();
         self.val = val;
     }
-} 
+}
 
 impl Default for Entry {
     fn default() -> Self {
@@ -54,17 +53,27 @@ impl Default for Entry {
     }
 }
 
+impl StaticSized for Entry {
+    #[inline]
+    fn len(&self) -> usize {
+        self.info.size
+    }
+    #[inline]
+    fn static_size(&self) -> usize {
+        self.info.size
+    }
+}
+
 impl Serialize for Entry {
-    fn serialize<W:Write>(&self, writer: &mut W) -> Result<(), TdbError> {
-        assert!(self.get_size() < Self::get_maxsize());
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
         // object info
         writer.write_u64::<LittleEndian>(self.info.clone().into())?;
         // key len
-        writer.write_u16::<LittleEndian>(self.key.len() as u16)?;
+        writer.write_u8(self.key.len() as u8)?;
         // key
         writer.write(&self.key)?;
         // val len
-        writer.write_u32::<LittleEndian>(self.val.len() as u32)?;
+        writer.write_u16::<LittleEndian>(self.val.len() as u16)?;
         // val
         writer.write(&self.val)?;
         Ok(())
@@ -72,16 +81,16 @@ impl Serialize for Entry {
 }
 
 impl Deserialize for Entry {
-    fn deserialize<R:Read>(reader: &mut R) -> Result<Self, TdbError> {
+    fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
         // object info
         let object_info = ObjectInfo::from(reader.read_u64::<LittleEndian>()?);
         // key len
-        let key_len: usize = reader.read_u16::<LittleEndian>()?.try_into().unwrap();
+        let key_len: usize = reader.read_u8()?.try_into().unwrap();
         // key
         let mut key = vec![0; key_len];
         reader.read_exact(&mut key)?;
         // val len
-        let val_len: usize = reader.read_u32::<LittleEndian>()?.try_into().unwrap();
+        let val_len: usize = reader.read_u16::<LittleEndian>()?.try_into().unwrap();
         // val
         let mut val = vec![0; val_len];
         reader.read_exact(&mut val)?;
@@ -131,26 +140,18 @@ impl AsObject for Entry {
             _ => false,
         }
     }
-    #[inline]  
+    #[inline]
     fn get_object_info(&self) -> &ObjectInfo {
         &self.info
     }
-        #[inline]
+    #[inline]
     fn get_object_info_mut(&mut self) -> &mut ObjectInfo {
         &mut self.info
     }
     #[inline]
     fn get_header_size() -> usize {
         // object_info + key len + val len
-        ObjectInfo::static_size() + mem::size_of::<u16>() + mem::size_of::<u32>()
-    }
-    #[inline]
-    fn get_size(&self) -> usize {
-        self.info.size
-    }
-    #[inline]
-    fn get_maxsize() -> usize {
-        MAX_ENTRY_SIZE
+        ObjectInfo::static_size() + mem::size_of::<u8>() + mem::size_of::<u16>()
     }
 }
 
@@ -170,6 +171,6 @@ mod tests {
         assert!(entry1.serialize(&mut buf.as_mut_slice()).is_ok());
         let entry11 = Entry::deserialize(&mut buf.as_slice()).unwrap();
         assert_eq!(entry1, entry11);
-        assert_eq!(entry1.get_size(), 8 + 2 + 4 + 3 + 3);
+        assert_eq!(entry1.len(), 8 + 1 + 2 + 3 + 3);
     }
 }

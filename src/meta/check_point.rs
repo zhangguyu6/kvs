@@ -19,8 +19,8 @@ pub struct CheckPoint {
     pub root_oid: ObjectId,
     // meta log area used size, 0 mean meta log is apply
     pub meta_log_total_len: u32,
-    // meta file len = allocated_objtablepage_nums  * 4096
-    pub allocated_objtablepage_nums: u32,
+    // meta file len = obj_tablepage_nums  * 4096
+    pub obj_tablepage_nums: u32,
     pub obj_changes: Vec<(ObjectId, Option<ObjectPos>)>,
 }
 
@@ -37,8 +37,8 @@ impl Default for CheckPoint {
             root_oid: UNUSED_OID,
             // meta log area used size, 0 mean meta log is apply
             meta_log_total_len: 0,
-            // meta file len = allocated_objtablepage_nums * 4096
-            allocated_objtablepage_nums: 0,
+            // meta file len = obj_tablepage_nums * 4096
+            obj_tablepage_nums: 0,
             obj_changes: Vec::with_capacity(0),
         }
     }
@@ -58,7 +58,7 @@ impl CheckPoint {
             + mem::size_of::<u32>()
             // meta_log_total_len
             + mem::size_of::<u32>()
-            // allocated_objtablepage_nums 
+            // obj_tablepage_nums 
             + mem::size_of::<u32>()
             // obj_changes len
             + mem::size_of::<u32>()
@@ -79,7 +79,7 @@ impl CheckPoint {
             + mem::size_of::<u32>()
             // meta_log_total_len
             + mem::size_of::<u32>()
-            // allocated_objtablepage_nums
+            // obj_tablepage_nums
             + mem::size_of::<u32>()
               // obj_changes len
             + mem::size_of::<u32>()
@@ -121,7 +121,7 @@ impl Serialize for CheckPoint {
         writer.write_u64::<LittleEndian>(self.data_log_len)?;
         writer.write_u32::<LittleEndian>(self.root_oid)?;
         writer.write_u32::<LittleEndian>(self.meta_log_total_len)?;
-        writer.write_u32::<LittleEndian>(self.allocated_objtablepage_nums)?;
+        writer.write_u32::<LittleEndian>(self.obj_tablepage_nums)?;
         writer.write_u32::<LittleEndian>(self.obj_changes.len() as u32)?;
         for i in 0..self.obj_changes.len() {
             writer.write_u32::<LittleEndian>(self.obj_changes[i].0)?;
@@ -149,7 +149,7 @@ impl Deserialize for CheckPoint {
         let data_log_len = reader.read_u64::<LittleEndian>()?;
         let root_oid = reader.read_u32::<LittleEndian>()?;
         let meta_log_total_len = reader.read_u32::<LittleEndian>()?;
-        let allocated_objtablepage_nums = reader.read_u32::<LittleEndian>()?;
+        let obj_tablepage_nums = reader.read_u32::<LittleEndian>()?;
         let obj_change_len = reader.read_u32::<LittleEndian>()? as usize;
         let mut obj_changes = Vec::with_capacity(obj_change_len);
         for _ in 0..obj_change_len {
@@ -168,7 +168,7 @@ impl Deserialize for CheckPoint {
             data_log_len,
             root_oid,
             meta_log_total_len,
-            allocated_objtablepage_nums,
+            obj_tablepage_nums,
             obj_changes,
         })
     }

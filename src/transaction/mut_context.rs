@@ -78,14 +78,14 @@ impl<'a> ObjectModify<'a> {
                 // object is new allcated, just remove it and free oid
                 MutObject::New(obj) => {
                     // reuse oid
-                    self.obj_allocater.free(oid);
+                    self.obj_allocater.free_oid(oid);
                     Some(obj)
                 }
                 // object is on disk, insert remove tag
                 MutObject::Readonly(obj) | MutObject::Dirty(obj) => {
                     self.dirty_cache.insert(oid, MutObject::Del);
                     // reuse oid
-                    self.obj_allocater.free(oid);
+                    self.obj_allocater.free_oid(oid);
                     Some(obj)
                 }
             }
@@ -98,13 +98,13 @@ impl<'a> ObjectModify<'a> {
 
     // Insert New object to dirty cache and Return allocated oid
     fn insert(&mut self, mut obj: Object) -> ObjectId {
-        let oid = match self.obj_allocater.allocate() {
+        let oid = match self.obj_allocater.allocate_oid() {
             Some(oid) => oid,
             None => {
                 self.obj_allocater.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
                 self.obj_table.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
                 self.obj_allocater
-                    .allocate()
+                    .allocate_oid()
                     .expect("no enough oid for object")
             }
         };

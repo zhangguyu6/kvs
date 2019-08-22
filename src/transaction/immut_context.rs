@@ -8,9 +8,7 @@ use crate::tree::{Branch, Entry, Leaf};
 
 use std::borrow::Borrow;
 use std::ops::Range;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 pub struct ImmutContext {
     pub ts: TimeStamp,

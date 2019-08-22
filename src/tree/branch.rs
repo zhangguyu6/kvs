@@ -1,20 +1,16 @@
 use super::{Key, MAX_KEY_LEN};
 use crate::error::TdbError;
-use crate::object::{
-    AsObject, Object,  ObjectId, ObjectInfo,ObjectTag,
-    UNUSED_OID,
-};
-use crate::storage::{Deserialize,Serialize};
+use crate::object::{AsObject, Object, ObjectId, ObjectInfo, ObjectTag, UNUSED_OID};
+use crate::storage::{Deserialize, Serialize, StaticSized};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
 use std::mem;
-use std::u16;
 
 const MAX_BRANCH_SIZE: usize = 4096;
 // key + key len + nodeid
 const MAX_NONSPLIT_BRANCH_SIZE: usize =
-    MAX_BRANCH_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() - mem::size_of::<u16>();
+    MAX_BRANCH_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() - mem::size_of::<u8>();
 
 const REBALANCE_BRANCH_SIZE: usize = MAX_BRANCH_SIZE / 4;
 
@@ -42,7 +38,7 @@ impl Branch {
     pub fn new(key: Key, oid0: ObjectId, oid1: ObjectId) -> Self {
         let size = Branch::get_header_size()
             + key.len()
-            + mem::size_of::<u16>()
+            + mem::size_of::<u8>()
             + 2 * mem::size_of::<ObjectId>();
         Self {
             keys: vec![key],
@@ -69,7 +65,7 @@ impl Branch {
     pub fn remove_index(&mut self, index: usize) -> (Key, ObjectId) {
         let key = self.keys.remove(index);
         let oid = self.children.remove(index + 1);
-        self.info.size -= key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+        self.info.size -= key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
         (key, oid)
     }
     pub fn update_key(&mut self, index: usize, key: Key) {
@@ -80,7 +76,7 @@ impl Branch {
     pub fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
         // don't use this function for root insert
         assert!(!self.children.is_empty());
-        self.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+        self.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
         self.keys.insert(index, key);
         self.children.insert(index + 1, oid);
     }
@@ -91,7 +87,7 @@ impl Branch {
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
         for i in 0..self.keys.len() {
-            left_size += self.keys[i].len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            left_size += self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             split_index = i;
             if left_size > MAX_BRANCH_SIZE / 2 {
                 // mid key will be remove and insert to parent branch
@@ -103,7 +99,7 @@ impl Branch {
         let split_key = self.keys.pop().unwrap();
         let right_size = self.info.size - left_size + Self::get_header_size();
         // children num is keys + 1
-        left_size -= split_key.len() + mem::size_of::<u16>();
+        left_size -= split_key.len() + mem::size_of::<u8>();
         self.info.size = left_size;
         let mut right_branch = Branch::default();
         right_branch.children = right_children;
@@ -115,7 +111,7 @@ impl Branch {
     // right_branch should be marked del after merge
     // merge_key is the key of right_branch's first child
     pub fn merge(&mut self, right_branch: &mut Branch, merge_key: Key) {
-        self.info.size += merge_key.len() + mem::size_of::<u16>();
+        self.info.size += merge_key.len() + mem::size_of::<u8>();
         self.keys.push(merge_key);
         self.keys.append(&mut right_branch.keys);
         self.children.append(&mut right_branch.children);
@@ -126,7 +122,7 @@ impl Branch {
     // rebalance_key is the key of right_branch's first child
     // return remove key as new key in parrent branch
     pub fn rebalance(&mut self, right_branch: &mut Branch, rebalance_key: Key) -> Key {
-        self.info.size += rebalance_key.len() + mem::size_of::<u16>();
+        self.info.size += rebalance_key.len() + mem::size_of::<u8>();
         self.keys.push(rebalance_key);
         self.keys.append(&mut right_branch.keys);
         self.children.append(&mut right_branch.children);
@@ -134,7 +130,7 @@ impl Branch {
         let mut split_index = 0;
         let mut left_size = Self::get_header_size();
         for i in 0..self.keys.len() {
-            left_size += self.keys[i].len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            left_size += self.keys[i].len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             split_index = i;
             if left_size > MAX_BRANCH_SIZE / 2 {
                 break;
@@ -144,7 +140,7 @@ impl Branch {
         right_branch.children = self.children.split_off(split_index + 1);
         right_branch.info.size = self.info.size - left_size + Self::get_header_size();
         let remove_key = self.keys.pop().unwrap();
-        self.info.size = left_size - remove_key.len() - mem::size_of::<u16>();
+        self.info.size = left_size - remove_key.len() - mem::size_of::<u8>();
         remove_key
     }
     #[inline]
@@ -158,12 +154,12 @@ impl Branch {
     #[inline]
     pub fn should_merge(left_branch: &Branch, right_branch: &Branch) -> bool {
         left_branch.info.size + right_branch.info.size - Branch::get_header_size()
-                <= MAX_NONSPLIT_BRANCH_SIZE
+            <= MAX_NONSPLIT_BRANCH_SIZE
     }
     #[inline]
     pub fn should_rebalance(left_branch: &Branch, right_branch: &Branch) -> bool {
         left_branch.info.size + right_branch.info.size - Branch::get_header_size()
-                > MAX_NONSPLIT_BRANCH_SIZE
+            > MAX_NONSPLIT_BRANCH_SIZE
     }
     #[inline]
     pub fn get_key(&self) -> &Key {
@@ -171,28 +167,38 @@ impl Branch {
     }
 }
 
+impl StaticSized for Branch {
+    #[inline]
+    fn len(&self) -> usize {
+        self.info.size
+    }
+    #[inline]
+    fn static_size(&self) -> usize {
+        MAX_BRANCH_SIZE
+    }
+}
+
 impl Serialize for Branch {
-    fn serialize<W:Write>(&self, writer: &mut W) -> Result<(), TdbError> {
-        assert!(self.get_size() < Self::get_maxsize());
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
         // object info
         writer.write_u64::<LittleEndian>(self.info.clone().into())?;
-        assert!(self.keys.len() < u16::MAX as usize);
+        assert!(self.keys.len() < MAX_KEY_LEN);
         // keys num
-        writer.write_u16::<LittleEndian>(self.keys.len() as u16)?;
+        writer.write_u8(self.keys.len() as u8)?;
         // keys
         for key in self.keys.iter() {
-            writer.write_u16::<LittleEndian>(key.len() as u16)?;
+            writer.write_u8(key.len() as u8)?;
             writer.write(&key)?;
         }
-        assert!(self.children.len() < u16::MAX as usize);
+        assert!(self.children.len() < MAX_KEY_LEN);
         // children num
-        writer.write_u16::<LittleEndian>(self.children.len() as u16)?;
+        writer.write_u8(self.children.len() as u8)?;
         // children
         for child in self.children.iter() {
             writer.write_u32::<LittleEndian>(*child)?;
         }
         // fill holy with zero
-        for _ in self.get_size()..MAX_BRANCH_SIZE {
+        for _ in self.len()..MAX_BRANCH_SIZE {
             writer.write_u8(0)?;
         }
         Ok(())
@@ -200,21 +206,21 @@ impl Serialize for Branch {
 }
 
 impl Deserialize for Branch {
-    fn deserialize<R:Read>(reader: &mut R) -> Result<Self, TdbError> {
+    fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
         // object info
         let object_info = ObjectInfo::from(reader.read_u64::<LittleEndian>()?);
         // keys num
-        let keys_len: usize = reader.read_u16::<LittleEndian>()? as usize;
+        let keys_len: usize = reader.read_u8()? as usize;
         let mut keys = Vec::with_capacity(keys_len);
         // keys
         for _ in 0..keys_len {
-            let key_len: usize = reader.read_u16::<LittleEndian>()? as usize;
+            let key_len: usize = reader.read_u8()? as usize;
             let mut key = vec![0; key_len];
             reader.read_exact(&mut key)?;
             keys.push(key);
         }
         // children num
-        let children_len: usize = reader.read_u16::<LittleEndian>()? as usize;
+        let children_len: usize = reader.read_u8()? as usize;
         let mut children = Vec::with_capacity(children_len);
         // children
         for _ in 0..children_len {
@@ -277,15 +283,7 @@ impl AsObject for Branch {
     #[inline]
     fn get_header_size() -> usize {
         // object_info + key num + child num
-        ObjectInfo::static_size() + mem::size_of::<u16>() + mem::size_of::<u16>()
-    }
-    #[inline]
-    fn get_size(&self) -> usize {
-        self.info.size
-    }
-    #[inline]
-    fn get_maxsize() -> usize {
-        MAX_BRANCH_SIZE
+        ObjectInfo::static_size() + mem::size_of::<u8>() + mem::size_of::<u8>()
     }
 }
 
@@ -296,7 +294,7 @@ mod tests {
     fn test_branch_serialize_deserialize() {
         // test empty
         let branch0 = Branch::default();
-        let mut buf:Vec<u8> = vec![0; 4096];
+        let mut buf: Vec<u8> = vec![0; 4096];
         assert!(branch0.serialize(&mut buf.as_mut_slice()).is_ok());
         let branch00 = Branch::deserialize(&mut buf.as_slice()).unwrap();
         // assert_eq!(branch0, branch00);
@@ -306,7 +304,7 @@ mod tests {
         branch1.keys.push(vec![1, 2, 3]);
         branch1.children.push(2);
         branch1.children.push(3);
-        branch1.info.size += 3 + 2 + 4 + 4;
+        branch1.info.size += 3 + 1 + 4 + 4;
         assert!(branch1.serialize(&mut buf.as_mut_slice()).is_ok());
         let branch11 = Branch::deserialize(&mut buf.as_slice()).unwrap();
         assert_eq!(branch1, branch11);
@@ -329,17 +327,17 @@ mod tests {
         let mut branch = Branch::default();
         for i in 1..3 {
             let key = vec![i];
-            branch.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch.keys.push(key);
             branch.children.push(i as u32);
         }
         branch.info.size += mem::size_of::<ObjectId>();
         branch.children.insert(0, 0);
-        assert_eq!(branch.get_size(), Branch::get_header_size() + 2 + 4 + 4 * 3);
+        assert_eq!(branch.len(), Branch::get_header_size() + 2 + 2 + 4 * 3);
         branch.insert_non_full(2, vec![4], 4);
         assert_eq!(
-            branch.get_size(),
-            Branch::get_header_size() + 2 + 4 + 4 * 3 + 1 + 2 + 4
+            branch.len(),
+            Branch::get_header_size() + 2 + 2 + 4 * 3 + 1 + 1 + 4
         );
         assert_eq!(branch.search(&vec![4]), (4, 3));
     }
@@ -349,7 +347,7 @@ mod tests {
         let mut branch = Branch::default();
         for i in 1..3 {
             let key = vec![i; 40];
-            branch.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch.keys.push(key);
             branch.children.push(i as u32);
         }
@@ -359,16 +357,16 @@ mod tests {
             branch.insert_non_full(i, vec![i as u8 + 1; 40], i as u32 + 1);
         }
         assert_eq!(
-            branch.get_size(),
-            Branch::get_header_size() + 40 * 100 + 2 * 100 + 4 * 101
+            branch.len(),
+            Branch::get_header_size() + 40 * 100 + 1 * 100 + 4 * 101
         );
         let branch0 = branch.clone();
         let (key, mut other) = branch.split();
-        assert_eq!(key, vec![45; 40]);
-        assert_eq!(branch.children.last().unwrap(), &44);
-        assert_eq!(other.keys[0], vec![46; 40]);
-        assert_eq!(other.children[0], 45);
-        branch.merge(&mut other, vec![45; 40]);
+        assert_eq!(key, vec![46; 40]);
+        assert_eq!(branch.children.last().unwrap(), &45);
+        assert_eq!(other.keys[0], vec![47; 40]);
+        assert_eq!(other.children[0], 46);
+        branch.merge(&mut other, vec![46; 40]);
         assert_eq!(branch0, branch);
     }
 
@@ -377,7 +375,7 @@ mod tests {
         let mut branch0 = Branch::default();
         for i in 1..3 {
             let key = vec![i; 40];
-            branch0.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch0.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch0.keys.push(key);
             branch0.children.push(i as u32);
         }
@@ -386,7 +384,7 @@ mod tests {
         let mut branch1 = Branch::default();
         for i in 4..6 {
             let key = vec![i; 40];
-            branch1.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch1.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch1.keys.push(key);
             branch1.children.push(i as u32);
         }
@@ -395,7 +393,7 @@ mod tests {
         let mut branch3 = Branch::default();
         for i in 1..6 {
             let key = vec![i; 40];
-            branch3.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch3.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch3.keys.push(key);
             branch3.children.push(i as u32);
         }
@@ -410,7 +408,7 @@ mod tests {
         let mut branch0 = Branch::default();
         for i in 1..3 {
             let key = vec![i; 40];
-            branch0.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch0.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch0.keys.push(key);
             branch0.children.push(i as u32);
         }
@@ -422,7 +420,7 @@ mod tests {
         let mut branch1 = Branch::default();
         for i in 11..13 {
             let key = vec![i; 40];
-            branch1.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch1.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch1.keys.push(key);
             branch1.children.push(i as u32);
         }
@@ -433,18 +431,18 @@ mod tests {
         }
         assert!(Branch::should_rebalance(&branch0, &branch1));
         let key = branch0.rebalance(&mut branch1, vec![10; 40]);
-        assert_eq!(key, vec![45; 40]);
+        assert_eq!(key, vec![46; 40]);
         let mut new_branch0 = branch0.clone();
         let mut new_branch1 = branch1.clone();
-        new_branch0.merge(&mut new_branch1, vec![45; 40]);
+        new_branch0.merge(&mut new_branch1, vec![46; 40]);
         let (key, new_branch1) = new_branch0.split();
-        assert_eq!(key, vec![45; 40]);
+        assert_eq!(key, vec![46; 40]);
         assert_eq!(branch0, new_branch0);
         assert_eq!(branch1, new_branch1);
         let mut branch = Branch::default();
         for i in 1..3 {
             let key = vec![i; 40];
-            branch.info.size += key.len() + mem::size_of::<u16>() + mem::size_of::<ObjectId>();
+            branch.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
             branch.keys.push(key);
             branch.children.push(i as u32);
         }

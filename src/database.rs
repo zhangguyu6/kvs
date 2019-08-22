@@ -55,11 +55,10 @@ impl DataBase {
         }
         let obj_table = ObjectTable::new(0);
         // about 1<<30
-        let mut obj_allocater =
-            ObjectAllocater::with_capacity(OBJECT_TABLE_ENTRY_PRE_PAGE * (1 << 18));
+        let mut obj_allocater = ObjectAllocater::new(0, 0);
         let mut table_reader = BufReader::new(dev.meta_table_file.try_clone()?);
         table_reader.seek(SeekFrom::Start(0))?;
-        for i in 0..cp.allocated_objtablepage_nums as usize {
+        for i in 0..cp.obj_tablepage_nums as usize {
             let page = ObjectTablePage::deserialize(&mut table_reader)?;
             assert_eq!(i as u32, page.get_page_id());
             for j in 0..page.2.len() {
@@ -73,7 +72,7 @@ impl DataBase {
         }
         let table_len = obj_table.len();
         obj_table.extend(
-            OBJECT_TABLE_ENTRY_PRE_PAGE * cp.allocated_objtablepage_nums as usize - table_len,
+            OBJECT_TABLE_ENTRY_PRE_PAGE * cp.obj_tablepage_nums as usize - table_len,
         );
         if !cp.obj_changes.is_empty() {
             for (oid, mut obj_pos) in cp.obj_changes.drain(..) {

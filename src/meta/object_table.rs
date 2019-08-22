@@ -9,70 +9,38 @@ use std::io::{Read, Write};
 use std::mem;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::u32;
 
-const MAX_CAP: u32 = u32::MAX;
-
-const OBJECT_TABLE_DEFAULT_PAGE_NUM: usize = MAX_CAP as usize / OBJECT_TABLE_ENTRY_PRE_PAGE;
+pub const OBJECT_TABLE_DEFAULT_PAGE_NUM: usize = 1 << 21;
 // 4K
 pub const OBJECT_TABLE_PAGE_SIZE: usize = 1 << 12;
-// 511
+// 512
 pub const OBJECT_TABLE_ENTRY_PRE_PAGE: usize =
-    (OBJECT_TABLE_PAGE_SIZE - mem::size_of::<ObjectId>()) / mem::size_of::<u64>();
+    OBJECT_TABLE_PAGE_SIZE / mem::size_of::<u64>();
+// 1 << 30
+pub const OBJECT_NUM:usize = OBJECT_TABLE_DEFAULT_PAGE_NUM * OBJECT_TABLE_ENTRY_PRE_PAGE;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
-pub struct ObjectTablePage(u32, u32, Vec<Option<ObjectPos>>);
+pub struct ObjectTablePage(pub Vec<ObjectPos>);
 
-impl ObjectTablePage {
-    pub fn get_page_id(&self) -> u32 {
-        self.0
-    }
-}
+
 
 impl Deserialize for ObjectTablePage {
     fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
-        let page_id = reader.read_u32::<LittleEndian>()?;
         let mut obj_poss = Vec::with_capacity(OBJECT_TABLE_ENTRY_PRE_PAGE);
-        let crc = reader.read_u32::<LittleEndian>()?;
         for _ in 0..OBJECT_TABLE_ENTRY_PRE_PAGE {
             let obj_pos = reader.read_u64::<LittleEndian>()?;
-            if obj_pos == 0 {
-                obj_poss.push(None);
-            } else {
-                obj_poss.push(Some(ObjectPos(obj_pos)));
-            }
+            obj_poss.push(ObjectPos(obj_pos));
         }
-        Ok(Self(page_id, crc, obj_poss))
+        Ok(Self(obj_poss))
     }
 }
 
 impl Serialize for ObjectTablePage {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
-        writer.write_u32::<LittleEndian>(self.0)?;
-        writer.write_u32::<LittleEndian>(self.1)?;
         for i in 0..OBJECT_TABLE_ENTRY_PRE_PAGE {
-            if let Some(obj_pos) = self.2.get(i) {
-                if let Some(obj_pos) = obj_pos {
-                    writer.write_u64::<LittleEndian>(obj_pos.0)?;
-                }
-            } else {
-                writer.write_u64::<LittleEndian>(0)?;
-            }
+            writer.write_u64::<LittleEndian>(self.0[i].0)?;
         }
         Ok(())
-    }
-}
-
-impl Into<Node<Versions>> for ObjectTablePage {
-    fn into(mut self) -> Node<Versions> {
-        let mut versions = Vec::with_capacity(self.2.len());
-        for obj_pos in self.2.drain(..) {
-            if let Some(obj_pos) = obj_pos {
-                let obj_ref = ObjectRef::on_disk(obj_pos, 0);
-                versions.push(RwLock::new(Versions::new_only(obj_ref)));
-            }
-        }
-        Node { children: versions }
     }
 }
 
@@ -81,10 +49,10 @@ pub struct ObjectTable {
 }
 
 impl ObjectTable {
-    pub fn new(cap: usize) -> Self {
+    pub fn new(len: usize) -> Self {
         Self {
             obj_table_pages: RadixTree::new(
-                cap as u32,
+                len as u32,
                 OBJECT_TABLE_DEFAULT_PAGE_NUM as u32,
                 OBJECT_TABLE_ENTRY_PRE_PAGE as u32,
             ),
@@ -174,11 +142,7 @@ impl ObjectTable {
     }
 
     pub fn append_page(&self, obj_table_page: ObjectTablePage) {
-        let old_len = self.obj_table_pages.add_len(obj_table_page.2.len() as u32);
-        assert_eq!(
-            old_len,
-            OBJECT_TABLE_ENTRY_PRE_PAGE as u32 * obj_table_page.0
-        );
+        let old_len = self.obj_table_pages.add_len(OBJECT_TABLE_ENTRY_PRE_PAGE as u32);
         let node_ptr = self.obj_table_pages.get_node_ptr(obj_table_page.0 as usize);
         let node: Node<Versions> = obj_table_page.into();
         let old_ptr = node_ptr.swap(Box::into_raw(Box::new(node)), Ordering::SeqCst);
