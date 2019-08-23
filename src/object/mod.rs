@@ -2,7 +2,7 @@ mod object_log;
 mod object_mut;
 mod object_ref;
 use crate::error::TdbError;
-use crate::storage::{Deserialize, Serialize};
+use crate::storage::{Deserialize, Serialize , StaticSized};
 use crate::tree::{Branch, Entry, Leaf};
 pub use object_log::ObjectLog;
 pub use object_mut::MutObject;
@@ -13,6 +13,7 @@ use std::u32;
 // Entry less than 2M
 pub const OBJECT_MAX_SIZE: usize = (1 << 21) as usize;
 pub const UNUSED_OID: u32 = u32::MAX;
+pub const META_DATA_ALIGN:usize = 4096;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Object {
@@ -77,6 +78,24 @@ impl Object {
             Object::L(leaf) => leaf.serialize(buf),
             Object::B(branch) => branch.serialize(buf),
             Object::E(entry) => entry.serialize(buf),
+        }
+    }
+}
+
+impl StaticSized for Object {
+    fn len(&self) -> usize {
+        match self {
+            Object::L(leaf) => leaf.len(),
+            Object::B(branch) => branch.len(),
+            Object::E(entry) => entry.len()
+        }
+    }
+
+    fn static_size(&self) -> usize {
+         match self {
+            Object::L(leaf) => leaf.static_size(),
+            Object::B(branch) => branch.static_size(),
+            Object::E(entry) => entry.static_size()
         }
     }
 }
