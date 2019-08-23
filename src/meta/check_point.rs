@@ -1,7 +1,7 @@
 // use super::{SegementId, SegementInfo};
 use crate::error::TdbError;
-use crate::object::{Object, ObjectId, UNUSED_OID};
-use crate::storage::{Deserialize, ObjectPos, Serialize};
+use crate::object::{ObjectId, UNUSED_OID};
+use crate::storage::{Deserialize, ObjectPos, Serialize,StaticSized};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 use std::mem;
@@ -21,14 +21,14 @@ pub struct CheckPoint {
     pub meta_log_total_len: u32,
     // meta file len = obj_tablepage_nums  * 4096
     pub obj_tablepage_nums: u32,
-    pub obj_changes: Vec<(ObjectId, Option<ObjectPos>)>,
+    pub obj_changes: Vec<(ObjectId, ObjectPos)>,
 }
 
 impl Default for CheckPoint {
     fn default() -> Self {
-        Self {
+        let mut cp = Self {
             // current checkpoint size,
-            check_point_len: CheckPoint::min_len() as u32,
+            check_point_len: 0,
             // crc fast
             crc: u32::MAX,
             // for gc
@@ -40,12 +40,17 @@ impl Default for CheckPoint {
             // meta file len = obj_tablepage_nums * 4096
             obj_tablepage_nums: 0,
             obj_changes: Vec::with_capacity(0),
-        }
+        };
+        let cp_len = cp.len();
+        cp.check_point_len = cp_len as u32;
+        cp.meta_log_total_len = cp_len as u32;
+        cp
     }
 }
 
-impl CheckPoint {
-    pub fn len(&self) -> usize {
+impl StaticSized for CheckPoint {
+    #[inline]
+    fn len(&self) -> usize {
         // check_point_len
         mem::size_of::<u32>()
         // crc 32
@@ -65,54 +70,12 @@ impl CheckPoint {
             // obj_changes
             + self.obj_changes.len() * (mem::size_of::<ObjectId>() + mem::size_of::<u64>())
     }
-
-    pub fn min_len() -> usize {
-        // check_point_len
-        mem::size_of::<u32>()
-        // crc 32
-        + mem::size_of::<u32>()
-        // data_log_remove_len
-            + mem::size_of::<u64>()
-            // data_log_len
-            + mem::size_of::<u64>()
-            // root_oid
-            + mem::size_of::<u32>()
-            // meta_log_total_len
-            + mem::size_of::<u32>()
-            // obj_tablepage_nums
-            + mem::size_of::<u32>()
-              // obj_changes len
-            + mem::size_of::<u32>()
-    }
-
-    pub fn malloc_obj(&mut self, obj: &Object) -> ObjectPos {
-        let obj_tag = obj.get_object_info().tag;
-        let obj_size = obj.get_object_info().size;
-        let obj_pos = ObjectPos::new(self.data_log_len, obj_size as u16, obj_tag);
-        self.data_log_len += obj_size as u64;
-        obj_pos
-    }
-
-    pub fn free_obj(&mut self, obj_pos: &ObjectPos) {
-        self.data_log_remove_len += obj_pos.get_len() as u64;
-    }
-
-    pub fn check<R: Read>(reader: &mut R) -> Vec<CheckPoint> {
-        let mut result = Vec::new();
-        loop {
-            match CheckPoint::deserialize(reader) {
-                Ok(cp) => {
-                    if cp.meta_log_total_len == 0 {
-                        result.clear();
-                    }
-                    result.push(cp);
-                }
-                Err(_) => break,
-            }
-        }
-        return result;
+    #[inline]
+    fn static_size(&self) -> usize {
+        self.len()
     }
 }
+
 impl Serialize for CheckPoint {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError> {
         writer.write_u32::<LittleEndian>(self.check_point_len)?;
@@ -125,11 +88,7 @@ impl Serialize for CheckPoint {
         writer.write_u32::<LittleEndian>(self.obj_changes.len() as u32)?;
         for i in 0..self.obj_changes.len() {
             writer.write_u32::<LittleEndian>(self.obj_changes[i].0)?;
-            if let Some(obj_pos) = self.obj_changes[i].1.clone() {
-                writer.write_u64::<LittleEndian>(obj_pos.0)?
-            } else {
-                writer.write_u64::<LittleEndian>(0)?
-            }
+            writer.write_u64::<LittleEndian>((self.obj_changes[i].1).0)?
         }
         Ok(())
     }
@@ -155,11 +114,8 @@ impl Deserialize for CheckPoint {
         for _ in 0..obj_change_len {
             let oid = reader.read_u32::<LittleEndian>()?;
             let obj_pos = reader.read_u64::<LittleEndian>()?;
-            if obj_pos == 0 {
-                obj_changes.push((oid, None));
-            } else {
-                obj_changes.push((oid, Some(ObjectPos(obj_pos))));
-            }
+             obj_changes.push((oid, ObjectPos(obj_pos)));
+            
         }
         Ok(Self {
             check_point_len,
@@ -176,14 +132,13 @@ impl Deserialize for CheckPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::*; 
     #[test]
     fn test_checkpoint_size() {
         let mut cp = CheckPoint::default();
         assert_eq!(cp.len(), 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4);
-        assert_eq!(cp.len(), CheckPoint::min_len());
-        cp.obj_changes.push((1, None));
-        assert_eq!(cp.len(), CheckPoint::min_len() + 4 + 8);
+        cp.obj_changes.push((1, ObjectPos::default()));
+        assert_eq!(cp.len(), 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4 + 4 + 8);
     }
 
     #[test]
@@ -195,7 +150,7 @@ mod tests {
         assert_eq!(cp0, cp1);
         assert!(CheckPoint::deserialize(&mut &buf[..8]).is_err());
         // println!("{:?}", CheckPoint::deserialize(&mut &buf[..8]));
-        cp0.obj_changes.push((1, None));
+        cp0.obj_changes.push((1, ObjectPos::default()));
         assert!(cp0.serialize(&mut &mut buf[..]).is_ok());
         let cp1 = CheckPoint::deserialize(&mut &buf[..]).unwrap();
         assert_eq!(cp0, cp1);
