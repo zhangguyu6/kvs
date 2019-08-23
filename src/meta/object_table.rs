@@ -7,22 +7,21 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use parking_lot::RwLock;
 use std::io::{Read, Write};
 use std::mem;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{Ordering,AtomicPtr};
 use std::sync::Arc;
 
 pub const OBJECT_TABLE_DEFAULT_PAGE_NUM: usize = 1 << 21;
 // 4K
 pub const OBJECT_TABLE_PAGE_SIZE: usize = 1 << 12;
 // 512
-pub const OBJECT_TABLE_ENTRY_PRE_PAGE: usize =
-    OBJECT_TABLE_PAGE_SIZE / mem::size_of::<u64>();
+pub const OBJECT_TABLE_ENTRY_PRE_PAGE: usize = OBJECT_TABLE_PAGE_SIZE / mem::size_of::<u64>();
 // 1 << 30
-pub const OBJECT_NUM:usize = OBJECT_TABLE_DEFAULT_PAGE_NUM * OBJECT_TABLE_ENTRY_PRE_PAGE;
+pub const OBJECT_NUM: usize = OBJECT_TABLE_DEFAULT_PAGE_NUM * OBJECT_TABLE_ENTRY_PRE_PAGE;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct ObjectTablePage(pub Vec<ObjectPos>);
 
-
+pub type PageId = u32;
 
 impl Deserialize for ObjectTablePage {
     fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
@@ -41,6 +40,17 @@ impl Serialize for ObjectTablePage {
             writer.write_u64::<LittleEndian>(self.0[i].0)?;
         }
         Ok(())
+    }
+}
+
+impl Into<Node<Versions>> for ObjectTablePage {
+    fn into(mut self) -> Node<Versions> {
+        let mut versions = Vec::with_capacity(self.0.len());
+        for obj_pos in self.0.drain(..) {
+            let obj_ref = ObjectRef::on_disk(obj_pos, 0);
+            versions.push(RwLock::new(Versions::new_only(obj_ref)));
+        }
+        Node { children: versions }
     }
 }
 
@@ -141,18 +151,10 @@ impl ObjectTable {
         self.obj_table_pages.extend(extend as u32) as usize
     }
 
-    pub fn append_page(&self, obj_table_page: ObjectTablePage) {
-        let old_len = self.obj_table_pages.add_len(OBJECT_TABLE_ENTRY_PRE_PAGE as u32);
-        let node_ptr = self.obj_table_pages.get_node_ptr(obj_table_page.0 as usize);
-        let node: Node<Versions> = obj_table_page.into();
-        let old_ptr = node_ptr.swap(Box::into_raw(Box::new(node)), Ordering::SeqCst);
-        assert!(old_ptr.is_null());
-    }
-
-    pub fn get_page(&self, page_id: u32) -> ObjectTablePage {
+    pub fn get_page(&self, pid: PageId) -> ObjectTablePage {
         let node_ptr = self
             .obj_table_pages
-            .get_node_ptr(page_id as usize)
+            .get_node_ptr(pid as usize)
             .load(Ordering::SeqCst);
         assert!(!node_ptr.is_null());
         let mut page = Vec::with_capacity(OBJECT_TABLE_ENTRY_PRE_PAGE);
@@ -161,11 +163,15 @@ impl ObjectTable {
             let read_versions = versions.read();
             page.push(read_versions.get_newest_objpos());
         }
-        ObjectTablePage(page_id, 1234, page)
+        ObjectTablePage(page)
     }
 
-    pub fn get_page_id(&self, oid: ObjectId) -> u32 {
-        self.obj_table_pages.get_level1_index(oid) as u32
+    pub fn get_page_ptr(&self,pid:PageId ) -> &AtomicPtr<Node<Versions>> {
+        self.obj_table_pages.get_node_ptr(pid as usize)
+    }
+
+    pub fn get_page_id(&self, oid: ObjectId) -> PageId {
+        self.obj_table_pages.get_level1_index(oid) as PageId
     }
 }
 
@@ -222,13 +228,14 @@ mod tests {
     #[test]
     fn test_object_table_serialize_deserialize() {
         let mut buf: [u8; 4096] = [0; 4096];
-        let obj_page1 = ObjectTablePage(0, 0, vec![None; 511]);
+        let obj_page1 = ObjectTablePage(vec![ObjectPos::default(); OBJECT_TABLE_ENTRY_PRE_PAGE]);
         let mut slice = &mut buf[..];
         assert!(obj_page1.serialize(&mut slice).is_ok());
         let obj_page2 = ObjectTablePage::deserialize(&mut (&buf[..])).unwrap();
         assert_eq!(obj_page1, obj_page2);
-        let mut obj_page1 = ObjectTablePage(1, 1234, vec![None; 511]);
-        obj_page1.2[0] = Some(ObjectPos(1));
+        let mut obj_page1 =
+            ObjectTablePage(vec![ObjectPos::default(); OBJECT_TABLE_ENTRY_PRE_PAGE]);
+        obj_page1.0[0] = ObjectPos(1);
         assert!(obj_page1.serialize(&mut &mut buf[..]).is_ok());
         let obj_page2 = ObjectTablePage::deserialize(&mut (&buf[..])).unwrap();
         assert_eq!(obj_page1, obj_page2);
