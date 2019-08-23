@@ -91,7 +91,7 @@ impl<B: AsBitBlock> BitMap<B> {
             all_bits: cap,
         }
     }
-    pub fn extend(&mut self,extend:usize) -> usize {
+    pub fn extend(&mut self, extend: usize) -> usize {
         assert!(extend % B::bits() == 0);
         let new_len = extend / B::bits() + self.bit_blocks.len();
         self.bit_blocks.resize(new_len, B::all_zero());
@@ -141,6 +141,9 @@ impl<B: AsBitBlock> BitMap<B> {
 
     #[inline]
     pub fn first_zero_with_hint(&self, hint: usize) -> Option<usize> {
+        if self.all_bits == 0 {
+            return None;
+        }
         if hint >= self.all_bits {
             panic!("overflow max bit bound")
         }
@@ -184,6 +187,9 @@ impl<B: AsBitBlock> BitMap<B> {
     }
     #[inline]
     pub fn first_one_with_hint(&self, hint: usize) -> Option<usize> {
+        if self.all_bits == 0 {
+            return None;
+        }
         if hint >= self.all_bits {
             panic!("overflow max bit bound")
         }
@@ -224,6 +230,11 @@ impl<B: AsBitBlock> BitMap<B> {
     #[inline]
     pub fn first_one(&self) -> Option<usize> {
         self.first_one_with_hint(0)
+    }
+
+    #[inline]
+    pub fn get_cap(&self) -> usize {
+        self.all_bits
     }
 }
 
@@ -317,5 +328,4 @@ mod tests {
         assert_eq!(bitmap.extend(EXTEND_LIMIT), 32 + (1 << 15) * 32);
         assert_eq!(bitmap.first_zero_with_hint_set(31), Some(32));
     }
-
 }
