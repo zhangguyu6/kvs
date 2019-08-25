@@ -1,15 +1,10 @@
-use crate::meta::{CheckPoint, ObjectTablePage, PageId, OBJECT_TABLE_PAGE_SIZE};
+use crate::error::TdbError;
 use crate::storage::{
-    DataLogFileReader, DataLogFilwWriter, MetaLogFileReader, MetaLogFileWriter,MetaTableFileReader,
-    MetaTableFileWriter, ObjectPos,
+    DataLogFileReader, DataLogFilwWriter, MetaLogFileReader, MetaLogFileWriter,
+    MetaTableFileReader, MetaTableFileWriter,
 };
-use crate::storage::{Deserialize, Serialize};
-use crate::{
-    error::TdbError,
-    object::{Object, ObjectId, ObjectLog, ObjectTag},
-};
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::fs::{self};
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone)]
@@ -52,7 +47,7 @@ impl Dev {
     }
     pub fn get_data_log_writer(&self, size: usize) -> Result<DataLogFilwWriter, TdbError> {
         let mut options = fs::OpenOptions::new();
-        let options_mut = options.read(true);
+        let options_mut = options.write(true).append(true);
         let mut file = options_mut.open(&self.data_log_file_path)?;
         file.seek(SeekFrom::Start(size as u64))?;
         Ok(DataLogFilwWriter::new(file))
@@ -71,18 +66,18 @@ impl Dev {
         file.seek(SeekFrom::Start(size as u64))?;
         Ok(MetaLogFileWriter::new(file, size))
     }
-    pub fn get_meta_table_reader(&self) -> Result<MetaTableFileReader,TdbError> {
+    pub fn get_meta_table_reader(&self) -> Result<MetaTableFileReader, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.read(true);
         let mut file = options_mut.open(&self.meta_table_path)?;
         file.seek(SeekFrom::Start(0))?;
-         Ok(MetaTableFileReader::new(file))
+        Ok(MetaTableFileReader::new(file))
     }
-    pub fn get_meta_table_writer(&self) -> Result<MetaTableFileWriter, TdbError> {
+    pub fn get_meta_table_writer(&self,obj_tablepage_nums:u32) -> Result<MetaTableFileWriter, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.write(true).append(true);
         let file = options_mut.open(&self.meta_table_path)?;
-        Ok(MetaTableFileWriter::new(file))
+        Ok(MetaTableFileWriter::new(file,obj_tablepage_nums))
     }
 }
 

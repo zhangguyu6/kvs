@@ -91,13 +91,6 @@ impl StaticSized for Object {
         }
     }
 
-    fn static_size(&self) -> usize {
-         match self {
-            Object::L(leaf) => leaf.static_size(),
-            Object::B(branch) => branch.static_size(),
-            Object::E(entry) => entry.static_size()
-        }
-    }
 }
 
 pub type ObjectId = u32;

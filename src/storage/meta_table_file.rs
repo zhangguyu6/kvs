@@ -6,6 +6,7 @@ use crate::meta::{
 use crate::object::Versions;
 use crate::storage::{Deserialize, Serialize};
 use crate::utils::Node;
+use log::debug;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::atomic::Ordering;
@@ -13,23 +14,21 @@ use std::sync::atomic::Ordering;
 const DEFAULT_BUF_SIZE: usize = 4096 * 2;
 pub struct MetaTableFileWriter {
     writer: BufWriter<File>,
+    pub obj_tablepage_nums : u32,
 }
 
-impl From<File> for MetaTableFileWriter {
-    fn from(file: File) -> Self {
-        Self {
-            writer: BufWriter::new(file),
-        }
-    }
-}
 
 impl MetaTableFileWriter {
-    pub fn new(file: File) -> Self {
+    pub fn new(file: File,obj_tablepage_nums:u32) -> Self {
         Self {
             writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
+            obj_tablepage_nums
         }
     }
     pub fn write_page(&mut self, pid: PageId, page: ObjectTablePage) -> Result<(), TdbError> {
+        if (pid+1) > self.obj_tablepage_nums {
+            self.obj_tablepage_nums = pid+1;
+        }
         self.writer
             .seek(SeekFrom::Start(pid as u64 * OBJECT_TABLE_PAGE_SIZE as u64))?;
         page.serialize(&mut self.writer)
@@ -62,6 +61,7 @@ impl MetaTableFileReader {
         &mut self,
         cp: &CheckPoint,
     ) -> Result<(ObjectTable, ObjectAllocater), TdbError> {
+        debug!("start read table, checkpoint is {:?}",cp);
         self.reader.seek(SeekFrom::Start(0))?;
         let obj_table =
             ObjectTable::new(0);

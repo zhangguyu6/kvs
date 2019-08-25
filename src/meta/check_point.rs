@@ -116,10 +116,6 @@ impl StaticSized for CheckPoint {
             // obj_changes
             + self.obj_changes.len() * (mem::size_of::<ObjectId>() + mem::size_of::<u64>())
     }
-    #[inline]
-    fn static_size(&self) -> usize {
-        self.len()
-    }
 }
 
 impl Serialize for CheckPoint {

@@ -172,10 +172,6 @@ impl StaticSized for Branch {
     fn len(&self) -> usize {
         self.info.size
     }
-    #[inline]
-    fn static_size(&self) -> usize {
-        MAX_BRANCH_SIZE
-    }
 }
 
 impl Serialize for Branch {
@@ -196,10 +192,6 @@ impl Serialize for Branch {
         // children
         for child in self.children.iter() {
             writer.write_u32::<LittleEndian>(*child)?;
-        }
-        // fill holy with zero
-        for _ in self.len()..MAX_BRANCH_SIZE {
-            writer.write_u8(0)?;
         }
         Ok(())
     }

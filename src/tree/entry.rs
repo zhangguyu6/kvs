@@ -27,7 +27,7 @@ impl Entry {
             val: val,
             info: ObjectInfo {
                 oid: oid,
-                tag: ObjectTag::Leaf,
+                tag: ObjectTag::Entry,
                 size: size,
             },
         }
@@ -56,10 +56,6 @@ impl Default for Entry {
 impl StaticSized for Entry {
     #[inline]
     fn len(&self) -> usize {
-        self.info.size
-    }
-    #[inline]
-    fn static_size(&self) -> usize {
         self.info.size
     }
 }

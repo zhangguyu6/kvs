@@ -74,6 +74,7 @@ impl AsBitBlock for u32 {
     }
 }
 
+#[derive(Debug)]
 pub struct BitMap<B> {
     bit_blocks: Vec<B>,
     all_bits: usize,
@@ -95,7 +96,7 @@ impl<B: AsBitBlock> BitMap<B> {
         assert!(extend % B::bits() == 0);
         let new_len = extend / B::bits() + self.bit_blocks.len();
         self.bit_blocks.resize(new_len, B::all_zero());
-        self.all_bits += EXTEND_LIMIT * B::bits();
+        self.all_bits += extend;
         self.all_bits
     }
 

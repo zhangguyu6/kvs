@@ -23,5 +23,4 @@ pub trait Deserialize: Sized {
 
 pub trait StaticSized: Sized {
     fn len(&self) -> usize;
-    fn static_size(&self) -> usize;
 }

@@ -3,6 +3,7 @@ use crate::object::{Object, ObjectId, ObjectTag, META_DATA_ALIGN};
 use crate::storage::{ObjectPos, StaticSized};
 use crate::utils::BitMap;
 
+#[derive(Debug)]
 pub struct ObjectAllocater {
     pub bitmap: BitMap<u32>,
     last_used: usize,
@@ -12,7 +13,7 @@ pub struct ObjectAllocater {
 
 impl Default for ObjectAllocater {
     fn default() -> Self {
-        Self::new(0,0,0)
+        Self::new(0, 0, 0)
     }
 }
 
@@ -35,17 +36,8 @@ impl ObjectAllocater {
         }
     }
     pub fn allocate_obj_pos(&mut self, obj: &Object) -> ObjectPos {
-        let len = obj.static_size();
+        let len = obj.len();
         let tag = obj.get_object_info().tag;
-        match tag {
-            ObjectTag::Branch | ObjectTag::Leaf => {
-                if len as usize % META_DATA_ALIGN != 0 {
-                    self.data_log_len +=
-                        (META_DATA_ALIGN - (len as usize % META_DATA_ALIGN)) as u64;
-                }
-            }
-            _ => {}
-        }
         let obj_pos = ObjectPos::new(self.data_log_len, len as u16, tag);
         self.data_log_len += len as u64;
         obj_pos
@@ -74,6 +66,7 @@ impl ObjectAllocater {
 
     pub fn get_page_num(&self) -> usize {
         let mut last_set_oid = None;
+        println!("bitmap cap is {:?}", self.bitmap.get_cap());
         for i in (0..self.bitmap.get_cap()).rev() {
             if self.bitmap.get_bit(i) {
                 last_set_oid = Some(i);

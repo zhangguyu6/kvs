@@ -160,9 +160,6 @@ impl StaticSized for Leaf {
     fn len(&self) -> usize {
         self.info.size
     }
-    fn static_size(&self) -> usize {
-        MAX_LEAF_SIZE
-    }
 }
 
 impl Serialize for Leaf {
@@ -179,10 +176,6 @@ impl Serialize for Leaf {
             writer.write(&key)?;
             // oid
             writer.write_u32::<LittleEndian>(*oid)?;
-        }
-        // fill hole
-        for _ in self.len()..MAX_LEAF_SIZE {
-            writer.write_u8(0)?;
         }
         Ok(())
     }

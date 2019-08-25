@@ -5,9 +5,9 @@ use crate::object::{MutObject, Object, ObjectId, ObjectRef};
 use crate::storage::{DataLogFileReader, ObjectPos};
 use crate::transaction::TimeStamp;
 use crate::tree::Entry;
+use log::debug;
 use std::collections::HashSet;
 use std::sync::Arc;
-
 pub struct ObjectAccess {
     ts: TimeStamp,
     obj_table: Arc<ObjectTable>,
@@ -112,6 +112,13 @@ impl ObjectModify {
                 self.obj_table
                     .get(oid, self.ts, &mut self.data_log_reader)?
             {
+                debug!(
+                    "obj is {:?} offset {:?} len {:?} tag {:?}",
+                    arc_obj,
+                    pos.get_pos(),
+                    pos.get_len(),
+                    pos.get_tag(),
+                );
                 self.dirty_cache
                     .insert(oid, MutObject::Readonly(arc_obj.clone()));
                 self.cache.insert(pos, arc_obj);
@@ -127,12 +134,19 @@ impl ObjectModify {
                 self.obj_table
                     .get(oid, self.ts, &mut self.data_log_reader)?
             {
+                debug!(
+                    "obj is {:?} offset {:?} len {:?} tag {:?} ",
+                    arc_obj,
+                    pos.get_pos(),
+                    pos.get_len(),
+                    pos.get_tag(),
+                );
                 self.dirty_cache
                     .insert(oid, MutObject::Readonly(arc_obj.clone()));
                 self.cache.insert(pos, arc_obj);
             }
         }
-        Ok(self.dirty_cache.get_mut(oid))
+        Ok(self.dirty_cache.get_mut_dirty(oid))
     }
     // Insert Del tag if object is ondisk, otherwise just remove it
     pub fn remove(&mut self, oid: ObjectId) -> Option<MutObject> {
@@ -171,6 +185,7 @@ impl ObjectModify {
             None => {
                 self.obj_allocater.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
                 self.obj_table.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
+                debug!("obj allocater extend");
                 self.obj_allocater
                     .allocate_oid()
                     .expect("no enough oid for object")
@@ -193,8 +208,11 @@ impl ObjectModify {
         oid
     }
 
-    pub fn commit(&mut self) -> () {
+    pub fn commit(&mut self) -> bool {
         let mut changes = self.dirty_cache.drain();
+        if changes.is_empty() {
+            return false;
+        }
         for (oid, obj) in changes.drain(..) {
             match obj {
                 MutObject::Dirty(obj) | MutObject::New(obj) => {
@@ -213,6 +231,7 @@ impl ObjectModify {
         // insert branch leaf
         for (oid, obj) in self.add_index_objs.iter() {
             let obj_pos = self.obj_allocater.allocate_obj_pos(obj);
+            debug!("pos {:?}",obj_pos.get_pos());
             let obj_ref = ObjectRef::on_disk(obj_pos, self.ts);
             match self.obj_table.insert(*oid, obj_ref, self.min_ts) {
                 Ok(()) => {}
@@ -222,7 +241,9 @@ impl ObjectModify {
         }
         // insert entry
         for (oid, obj) in self.add_entry_objs.iter() {
+            debug!("entry is {:?}",obj);
             let obj_pos = self.obj_allocater.allocate_obj_pos(obj);
+            debug!("pos {:?} tag {:?}",obj_pos.get_pos(),obj_pos.get_tag());
             let obj_ref = ObjectRef::on_disk(obj_pos, self.ts);
             match self.obj_table.insert(*oid, obj_ref, self.min_ts) {
                 Ok(()) => {}
@@ -243,5 +264,6 @@ impl ObjectModify {
             let pid = self.obj_table.get_page_id(*oid);
             self.dirty_pages.insert(pid);
         }
+        true
     }
 }

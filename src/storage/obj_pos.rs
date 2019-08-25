@@ -1,4 +1,5 @@
 use crate::object::{ObjectInfo, ObjectTag};
+use std::fmt;
 use std::io::SeekFrom;
 use std::u64;
 // [20~63)
@@ -8,8 +9,20 @@ pub const MAX_OBJECT_SIZE: u64 = (1 << 16) - 1;
 // [1~4)
 pub const MAX_OBJECT_TAG_SIZE: u64 = (1 << 4) - 1;
 
-#[derive(Eq, PartialEq, Clone, Debug,Copy,Hash)]
+#[derive(Eq, PartialEq, Clone, Copy, Hash)]
 pub struct ObjectPos(pub u64);
+
+impl fmt::Debug for ObjectPos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ObjectPos {{ offset: {:?}, len: {:?} , tag :{:?} }}",
+            self.get_pos(),
+            self.get_len(),
+            self.get_tag()
+        )
+    }
+}
 
 impl Into<SeekFrom> for ObjectPos {
     fn into(self) -> SeekFrom {
@@ -94,5 +107,7 @@ mod tests {
         assert_eq!(obj_pos.get_pos(), 1 << 40);
         assert_eq!(obj_pos.get_len(), u16::MAX);
         assert_eq!(obj_pos.get_tag(), ObjectTag::Leaf);
+        let mut obj_pos = ObjectPos::new(1, 127, ObjectTag::Entry);
+        assert_eq!(obj_pos.get_tag(), ObjectTag::Entry);
     }
 }

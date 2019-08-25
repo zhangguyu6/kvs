@@ -6,6 +6,7 @@ use crate::meta::{CheckPoint, ObjectAllocater, ObjectModify, ObjectTable, PageId
 use crate::object::{Object, ObjectId, UNUSED_OID};
 use crate::storage::{DataLogFilwWriter, Dev, MetaLogFileWriter, MetaTableFileWriter};
 use crate::tree::{Branch, Entry, Key, Leaf, Val, MAX_KEY_LEN};
+use log::debug;
 use std::borrow::Borrow;
 use std::collections::{HashSet, VecDeque};
 use std::mem;
@@ -25,7 +26,7 @@ impl MutContext {
     pub fn new_empty(dev: Dev) -> Result<(Self, Arc<ObjectTable>, ImMutCache), TdbError> {
         let data_log_reader = dev.get_data_log_reader()?;
         let meta_log_writer = dev.get_meta_log_writer(0)?;
-        let meta_table_writer = dev.get_meta_table_writer()?;
+        let meta_table_writer = dev.get_meta_table_writer(0)?;
         let data_log_writer = dev.get_data_log_writer(0)?;
         let mut_ctx = Self {
             root_oid: UNUSED_OID,
@@ -49,10 +50,10 @@ impl MutContext {
     ) -> Result<(Self, Arc<ObjectTable>, ImMutCache), TdbError> {
         let data_log_reader = dev.get_data_log_reader()?;
         let meta_log_writer = dev.get_meta_log_writer(cp.meta_log_total_len as usize)?;
-        let meta_table_writer = dev.get_meta_table_writer()?;
+        let meta_table_writer = dev.get_meta_table_writer(cp.obj_tablepage_nums)?;
         let data_log_writer = dev.get_data_log_writer(cp.data_log_len as usize)?;
         let mut_ctx = Self {
-            root_oid: UNUSED_OID,
+            root_oid: cp.root_oid,
             obj_modify: ObjectModify::new(data_log_reader, obj_table, obj_allocater, dirty_pages),
             meta_log_writer: meta_log_writer,
             meta_table_writer: meta_table_writer,
@@ -74,8 +75,10 @@ impl MutContext {
         assert!(key.len() <= MAX_KEY_LEN);
         let val: Val = val.into();
         if let Some(oid) = self.get_obj(&key)? {
+            debug!("get oid {:?}", oid);
             // make oid dirty
             if let Some(obj_mut) = self.obj_modify.get_mut(oid)? {
+                debug!("obj_mut is {:?}", obj_mut);
                 assert!(obj_mut.is::<Entry>());
                 let entry_mut = obj_mut.get_mut::<Entry>();
                 assert!(entry_mut.key == key);
@@ -521,6 +524,7 @@ impl MutContext {
     }
 
     fn get_obj<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<ObjectId>, TdbError> {
+        debug!("root oid is {:?}", self.root_oid);
         // tree is empty
         if self.root_oid == UNUSED_OID {
             return Ok(None);
@@ -531,6 +535,7 @@ impl MutContext {
                 .obj_modify
                 .get_ref(current_oid)?
                 .ok_or(TdbError::NotFindObject)?;
+            debug!("obj is {:?}", current_obj);
             match current_obj {
                 Object::E(_) => unreachable!(),
                 Object::L(leaf) => match leaf.search(key) {
@@ -557,21 +562,36 @@ impl MutContext {
     }
 
     pub fn commit(&mut self) -> Result<Arc<Context>, TdbError> {
-        self.obj_modify.commit();
+        debug!("mut context commit start");
+        if !self.obj_modify.commit() {
+            let ctx = Arc::new(Context {
+                ts: self.obj_modify.ts,
+                root_oid: self.root_oid,
+            });
+            self.gc_ctx.push_back((
+                Arc::downgrade(&ctx),
+                ctx.ts,
+                mem::replace(&mut self.obj_modify.current_gc_ctx, Vec::default()),
+            ));
+            return Ok(ctx);
+        }
         // write data log
+        debug!("data log write start");
         self.data_log_writer.write_obj_log(
             &self.obj_modify.add_index_objs,
             &self.obj_modify.add_entry_objs,
         )?;
+        debug!("make new checkpoint start");
         // make new checkpoint
         let cp = CheckPoint::new(
             self.obj_modify.obj_allocater.data_log_remove_len,
             self.obj_modify.obj_allocater.data_log_len,
             self.root_oid,
             self.meta_log_writer.size as u32,
-            self.obj_modify.obj_allocater.get_page_num() as u32,
+            self.meta_table_writer.obj_tablepage_nums,
             mem::replace(&mut self.obj_modify.meta_logs, Vec::with_capacity(0)),
         );
+        debug!("checkpoint at {:?}", &cp);
         // write checkpoint
         match self.meta_log_writer.write_cp(&cp) {
             Ok(()) => {}

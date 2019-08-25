@@ -1,12 +1,8 @@
-use super::ObjectPos;
-use crate::meta::{CheckPoint, ObjectTablePage, PageId, OBJECT_TABLE_PAGE_SIZE};
+use crate::error::TdbError;
+use crate::meta::CheckPoint;
 use crate::storage::{Deserialize, Serialize, StaticSized};
-use crate::{
-    error::TdbError,
-    object::{Object, ObjectId, ObjectLog, ObjectTag},
-};
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 // meta log file less than 2M
@@ -20,10 +16,10 @@ pub struct MetaLogFileWriter {
 }
 
 impl MetaLogFileWriter {
-    pub fn new(file:File,size:usize) -> Self {
-       Self {
-            writer:BufWriter::with_capacity(DEFAULT_BUF_SIZE,file),
-            size :size
+    pub fn new(file: File, size: usize) -> Self {
+        Self {
+            writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
+            size: size,
         }
     }
     pub fn write_cp(&mut self, cp: &CheckPoint) -> Result<(), TdbError> {

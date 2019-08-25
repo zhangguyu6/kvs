@@ -1,4 +1,3 @@
-use crate::error::TdbError;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use std::u32;
