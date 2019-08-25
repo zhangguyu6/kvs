@@ -1,7 +1,6 @@
-use crate::object::{Object, ObjectId};
-use crate::transaction::TimeStamp;
+use crate::object::Object;
+use crate::storage::ObjectPos;
 use crate::tree::Entry;
-
 use crossbeam::{
     channel::{unbounded, Receiver, Sender, TryRecvError},
     utils::Backoff,
@@ -11,45 +10,62 @@ use lru_cache::LruCache;
 use std::sync::Arc;
 use std::thread;
 
+const DEFAULT_CACHE_SIZE: usize = 4096;
+
 enum ObjectOp {
-    Insert(ObjectId, TimeStamp, Arc<Object>),
-    Remove(ObjectId, TimeStamp),
+    Insert(ObjectPos, Arc<Object>),
+    Remove(ObjectPos),
     Clear,
     Close,
 }
 
-pub struct BackgroundCache {
+pub struct ImMutCache {
     sender: Sender<ObjectOp>,
 }
 
-pub struct BackgroundCacheInner {
-    lru_cache: LruCache<(ObjectId, TimeStamp), Arc<Object>>,
+impl Default for ImMutCache {
+    fn default() -> Self {
+        ImMutCacheInner::with_capacity(DEFAULT_CACHE_SIZE)
+    }
+}
+
+impl Clone for ImMutCache {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+pub struct ImMutCacheInner {
+    lru_cache: LruCache<ObjectPos, Arc<Object>>,
     receiver: Receiver<ObjectOp>,
 }
 
-impl BackgroundCacheInner {
-    pub fn new(cap: usize) -> BackgroundCache {
+impl ImMutCacheInner {
+    pub fn with_capacity(cap: usize) -> ImMutCache {
         let lru_cache = LruCache::new(cap);
         let (sender, receiver) = unbounded();
-        let cache = BackgroundCacheInner {
+        let cache = ImMutCacheInner {
             lru_cache: lru_cache,
             receiver: receiver,
         };
-        let handler = BackgroundCache { sender };
+        let handler = ImMutCache { sender };
         cache.work();
         handler
     }
+
     fn work(mut self) {
         thread::spawn(move || loop {
             let backoff = Backoff::new();
             match self.receiver.try_recv() {
                 Ok(op) => {
                     match op {
-                        ObjectOp::Insert(node_id, ts, arc_node) => {
-                            self.lru_cache.insert((node_id, ts), arc_node);
+                        ObjectOp::Insert(obj_pos, arc_node) => {
+                            self.lru_cache.insert(obj_pos, arc_node);
                         }
-                        ObjectOp::Remove(node_id, ts) => {
-                            self.lru_cache.remove(&(node_id, ts));
+                        ObjectOp::Remove(obj_pos) => {
+                            self.lru_cache.remove(&obj_pos);
                         }
                         ObjectOp::Clear => {
                             self.lru_cache.clear();
@@ -73,20 +89,17 @@ impl BackgroundCacheInner {
     }
 }
 
-impl  BackgroundCache {
-    pub fn insert(&self, oid: ObjectId, ts: TimeStamp, arc_obj: Arc<Object>) {
+impl ImMutCache {
+    pub fn insert(&self, obj_pos: ObjectPos, arc_obj: Arc<Object>) {
         if !arc_obj.is::<Entry>() {
             self.sender
-                .try_send(ObjectOp::Insert(oid, ts, arc_obj))
+                .try_send(ObjectOp::Insert(obj_pos, arc_obj))
                 .expect("send error");
         }
     }
-    pub fn get(&self, oid: ObjectId, ts: TimeStamp) -> Option<Arc<Object>> {
-        None
-    }
-    pub fn remove(&self, oid: ObjectId, ts: TimeStamp) {
+    pub fn remove(&self, obj_pos: ObjectPos) {
         self.sender
-            .try_send(ObjectOp::Remove(oid, ts))
+            .try_send(ObjectOp::Remove(obj_pos))
             .expect("send error");
     }
     pub fn clear(&self) {

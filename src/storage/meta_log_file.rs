@@ -1,6 +1,6 @@
 use super::ObjectPos;
-use crate::meta::{CheckPoint, ObjectTablePage, OBJECT_TABLE_PAGE_SIZE,PageId};
-use crate::storage::{Deserialize, Serialize,StaticSized};
+use crate::meta::{CheckPoint, ObjectTablePage, PageId, OBJECT_TABLE_PAGE_SIZE};
+use crate::storage::{Deserialize, Serialize, StaticSized};
 use crate::{
     error::TdbError,
     object::{Object, ObjectId, ObjectLog, ObjectTag},
@@ -9,16 +9,24 @@ use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-// meta log file less than 2M 
+// meta log file less than 2M
 pub const META_LOG_FILE_MAX_SIZE: usize = 1 << 21;
+
+const DEFAULT_BUF_SIZE: usize = 4096 * 2;
 
 pub struct MetaLogFileWriter {
     writer: BufWriter<File>,
-    size: usize,
+    pub size: usize,
 }
 
 impl MetaLogFileWriter {
-    fn write_cp(&mut self, cp: &CheckPoint) -> Result<(), TdbError> {
+    pub fn new(file:File,size:usize) -> Self {
+       Self {
+            writer:BufWriter::with_capacity(DEFAULT_BUF_SIZE,file),
+            size :size
+        }
+    }
+    pub fn write_cp(&mut self, cp: &CheckPoint) -> Result<(), TdbError> {
         if self.size + cp.len() > META_LOG_FILE_MAX_SIZE {
             return Err(TdbError::NoSpace);
         } else {
@@ -30,7 +38,7 @@ impl MetaLogFileWriter {
         }
     }
 
-    fn write_cp_rename<P: AsRef<Path>>(
+    pub fn write_cp_rename<P: AsRef<Path>>(
         &mut self,
         cp: &CheckPoint,
         meta_log_file_path: P,
@@ -50,13 +58,17 @@ impl MetaLogFileWriter {
     }
 }
 
-
 pub struct MetaLogFileReader {
     reader: BufReader<File>,
 }
 
 impl MetaLogFileReader {
-    pub fn read_cps(&mut self) -> Result<Vec<CheckPoint>,TdbError> {
+    pub fn new(file: File) -> Self {
+        Self {
+            reader: BufReader::with_capacity(DEFAULT_BUF_SIZE, file),
+        }
+    }
+    pub fn read_cps(&mut self) -> Result<Vec<CheckPoint>, TdbError> {
         let mut cps = Vec::default();
         loop {
             match CheckPoint::deserialize(&mut self.reader) {

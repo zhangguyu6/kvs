@@ -1,4 +1,4 @@
-mod background_cache;
+mod immut_cache; 
 mod mut_cache;
-pub use background_cache::{BackgroundCache,BackgroundCacheInner};
+pub use immut_cache::{ImMutCache,ImMutCacheInner};
 pub use mut_cache::MutObjectCache;

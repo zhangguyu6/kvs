@@ -8,7 +8,7 @@ pub const MAX_OBJECT_SIZE: u64 = (1 << 16) - 1;
 // [1~4)
 pub const MAX_OBJECT_TAG_SIZE: u64 = (1 << 4) - 1;
 
-#[derive(Eq, PartialEq, Clone, Debug)]
+#[derive(Eq, PartialEq, Clone, Debug,Copy,Hash)]
 pub struct ObjectPos(pub u64);
 
 impl Into<SeekFrom> for ObjectPos {

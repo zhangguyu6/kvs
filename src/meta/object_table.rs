@@ -58,6 +58,12 @@ pub struct ObjectTable {
     obj_table_pages: RadixTree<Versions>,
 }
 
+impl Default for ObjectTable {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
 impl ObjectTable {
     pub fn new(len: usize) -> Self {
         Self {
@@ -77,23 +83,23 @@ impl ObjectTable {
         oid: ObjectId,
         ts: TimeStamp,
         file: &mut DataLogFileReader,
-    ) -> Result<Option<Arc<Object>>, TdbError> {
+    ) -> Result<Option<(ObjectPos,Arc<Object>)>, TdbError> {
         if let Some(read_versions) = self.obj_table_pages.get_readlock(oid) {
             if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
+                let pos = obj_ref.obj_pos.clone();
                 if let Some(arc_obj) = obj_ref.obj_ref.upgrade() {
-                    return Ok(Some(arc_obj));
+                    return Ok(Some((pos,arc_obj)));
                 } else {
-                    let pos = obj_ref.obj_pos.clone();
                     drop(read_versions);
                     let mut write_versions = self.obj_table_pages.get_writelock(oid).unwrap();
                     let obj_mut = write_versions.find_obj_mut(ts).unwrap();
                     if let Some(arc_obj) = obj_mut.obj_ref.upgrade() {
-                        return Ok(Some(arc_obj));
+                        return Ok(Some((pos,arc_obj)));
                     } else {
                         let obj = file.read_obj(&pos)?;
                         let arc_obj = Arc::new(obj);
                         obj_mut.obj_ref = Arc::downgrade(&arc_obj);
-                        return Ok(Some(arc_obj));
+                        return Ok(Some((pos,arc_obj)));
                     }
                 }
             }

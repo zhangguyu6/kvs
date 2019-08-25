@@ -1,138 +1,79 @@
 use super::TimeStamp;
-use crate::cache::{BackgroundCache, MutObjectCache};
+use crate::cache::ImMutCache;
+use crate::database::Context;
 use crate::error::TdbError;
-use crate::meta::{CheckPoint, ObjectAllocater, ObjectTable, OBJECT_TABLE_ENTRY_PRE_PAGE};
-use crate::object::{MutObject, Object, ObjectId, UNUSED_OID};
-use crate::storage::{DataLogFileReader, DataLogFilwWriter, MetaLogFileWriter, MetaTableFileWriter};
+use crate::meta::{CheckPoint, ObjectAllocater, ObjectModify, ObjectTable, PageId};
+use crate::object::{Object, ObjectId, UNUSED_OID};
+use crate::storage::{DataLogFilwWriter, Dev, MetaLogFileWriter, MetaTableFileWriter};
 use crate::tree::{Branch, Entry, Key, Leaf, Val, MAX_KEY_LEN};
 use std::borrow::Borrow;
-use std::collections::{BTreeSet, HashSet};
-use std::sync::Arc;
+use std::collections::{HashSet, VecDeque};
+use std::mem;
+use std::sync::{Arc, Weak};
 
-pub struct MutContext<'a> {
-    ts: TimeStamp,
+pub struct MutContext {
     root_oid: ObjectId,
-    obj_modify: ObjectModify<'a>,
-    cp: &'a mut CheckPoint,
-    meta_log_file: MetaLogFileWriter,
-    meta_table_file: MetaTableFileWriter,
-    gc_oids: Vec<ObjectId>,
-    dirty_pages: &'a mut BTreeSet<u32>,
+    obj_modify: ObjectModify,
+    meta_log_writer: MetaLogFileWriter,
+    meta_table_writer: MetaTableFileWriter,
+    data_log_writer: DataLogFilwWriter,
+    gc_ctx: VecDeque<(Weak<Context>, TimeStamp, Vec<ObjectId>)>,
+    dev: Dev,
 }
 
-struct ObjectModify<'a> {
-    ts: TimeStamp,
-    obj_table: Arc<ObjectTable>,
-    obj_allocater: &'a mut ObjectAllocater,
-    dirty_cache: &'a mut MutObjectCache,
-    data_file_reader: DataLogFileReader,
-    data_file_writer: DataLogFilwWriter,
-}
-
-impl<'a> ObjectModify<'a> {
-    // Return reference of New/Insert/Ondisk object, None for del object
-    // try to find object_table if not found
-    fn get_ref(&mut self, oid: ObjectId) -> Result<Option<&Object>, TdbError> {
-        if !self.dirty_cache.contain(oid) {
-            if let Some(arc_obj) = self
-                .obj_table
-                .get(oid, self.ts, &mut self.data_file_reader)?
-            {
-                self.dirty_cache.insert(oid, MutObject::Readonly(arc_obj));
-            }
-        }
-        if let Some(mut_obj) = self.dirty_cache.get_mut(oid) {
-            if let Some(obj_ref) = mut_obj.get_ref() {
-                return Ok(Some(obj_ref));
-            }
-        }
-        Ok(None)
-    }
-    // Return mut reference of New/Insert/Ondisk object
-    // Not allow to update removed object
-    fn get_mut(&mut self, oid: ObjectId) -> Result<Option<&mut Object>, TdbError> {
-        if !self.dirty_cache.contain(oid) {
-            if let Some(arc_obj) = self
-                .obj_table
-                .get(oid, self.ts, &mut self.data_file_reader)?
-            {
-                self.dirty_cache.insert(oid, MutObject::Readonly(arc_obj));
-            }
-        }
-        if let Some(mut_obj) = self.dirty_cache.get_mut_dirty(oid) {
-            if let Some(obj_mut) = mut_obj.get_mut() {
-                return Ok(Some(obj_mut));
-            }
-        }
-        Ok(None)
-    }
-    // Insert Del tag if object is ondisk, otherwise just remove it
-    fn remove(&mut self, oid: ObjectId) -> Option<Arc<Object>> {
-        if let Some(mut_obj) = self.dirty_cache.remove(oid) {
-            match mut_obj {
-                // object is del, do nothing
-                MutObject::Del => {
-                    self.dirty_cache.insert(oid, mut_obj);
-                    None
-                }
-                // object is new allcated, just remove it and free oid
-                MutObject::New(obj) => {
-                    // reuse oid
-                    self.obj_allocater.free_oid(oid);
-                    Some(obj)
-                }
-                // object is on disk, insert remove tag
-                MutObject::Readonly(obj) | MutObject::Dirty(obj) => {
-                    self.dirty_cache.insert(oid, MutObject::Del);
-                    // reuse oid
-                    self.obj_allocater.free_oid(oid);
-                    Some(obj)
-                }
-            }
-        } else {
-            // object is on disk, insert remove tag
-            self.dirty_cache.insert(oid, MutObject::Del);
-            None
-        }
-    }
-
-    // Insert New object to dirty cache and Return allocated oid
-    fn insert(&mut self, mut obj: Object) -> ObjectId {
-        let oid = match self.obj_allocater.allocate_oid() {
-            Some(oid) => oid,
-            None => {
-                self.obj_allocater.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
-                self.obj_table.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
-                self.obj_allocater
-                    .allocate_oid()
-                    .expect("no enough oid for object")
-            }
+impl MutContext {
+    pub fn new_empty(dev: Dev) -> Result<(Self, Arc<ObjectTable>, ImMutCache), TdbError> {
+        let data_log_reader = dev.get_data_log_reader()?;
+        let meta_log_writer = dev.get_meta_log_writer(0)?;
+        let meta_table_writer = dev.get_meta_table_writer()?;
+        let data_log_writer = dev.get_data_log_writer(0)?;
+        let mut_ctx = Self {
+            root_oid: UNUSED_OID,
+            obj_modify: ObjectModify::new_empty(data_log_reader),
+            meta_log_writer: meta_log_writer,
+            meta_table_writer: meta_table_writer,
+            data_log_writer: data_log_writer,
+            gc_ctx: VecDeque::default(),
+            dev: dev,
         };
-        obj.get_object_info_mut().oid = oid;
-        if let Some(mut_obj) = self.dirty_cache.remove(oid) {
-            match mut_obj {
-                // object is on disk
-                MutObject::Del | MutObject::Dirty(_) | MutObject::Readonly(_) => {
-                    self.dirty_cache
-                        .insert(oid, MutObject::Dirty(Arc::new(obj)));
-                }
-                _ => {
-                    self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));
-                }
-            }
-        } else {
-            self.dirty_cache.insert(oid, MutObject::New(Arc::new(obj)));
-        }
-        oid
+        let obj_table = mut_ctx.obj_modify.obj_table.clone();
+        let cache = mut_ctx.obj_modify.cache.clone();
+        Ok((mut_ctx, obj_table, cache))
     }
-}
+    pub fn new(
+        dev: Dev,
+        cp: &CheckPoint,
+        obj_table: ObjectTable,
+        obj_allocater: ObjectAllocater,
+        dirty_pages: HashSet<PageId>,
+    ) -> Result<(Self, Arc<ObjectTable>, ImMutCache), TdbError> {
+        let data_log_reader = dev.get_data_log_reader()?;
+        let meta_log_writer = dev.get_meta_log_writer(cp.meta_log_total_len as usize)?;
+        let meta_table_writer = dev.get_meta_table_writer()?;
+        let data_log_writer = dev.get_data_log_writer(cp.data_log_len as usize)?;
+        let mut_ctx = Self {
+            root_oid: UNUSED_OID,
+            obj_modify: ObjectModify::new(data_log_reader, obj_table, obj_allocater, dirty_pages),
+            meta_log_writer: meta_log_writer,
+            meta_table_writer: meta_table_writer,
+            data_log_writer: data_log_writer,
+            gc_ctx: VecDeque::default(),
+            dev: dev,
+        };
+        let obj_table = mut_ctx.obj_modify.obj_table.clone();
+        let cache = mut_ctx.obj_modify.cache.clone();
+        Ok((mut_ctx, obj_table, cache))
+    }
 
-impl<'a> MutContext<'a> {
+    #[inline]
+    pub fn increase_ts(&mut self) {
+        self.obj_modify.ts += 1;
+    }
     pub fn insert<K: Into<Key>, V: Into<Val>>(&mut self, key: K, val: V) -> Result<(), TdbError> {
         let key: Key = key.into();
         assert!(key.len() <= MAX_KEY_LEN);
         let val: Val = val.into();
-        if let Some(oid) = self.get_oid(&key)? {
+        if let Some(oid) = self.get_obj(&key)? {
             // make oid dirty
             if let Some(obj_mut) = self.obj_modify.get_mut(oid)? {
                 assert!(obj_mut.is::<Entry>());
@@ -248,7 +189,7 @@ impl<'a> MutContext<'a> {
         &mut self,
         key: &K,
     ) -> Result<Option<(Key, ObjectId)>, TdbError> {
-        if let Some(entry_oid) = self.get_oid(key)? {
+        if let Some(entry_oid) = self.get_obj(key)? {
             let mut current_oid = self.root_oid;
             let mut current_index = 0;
             let mut parent_oid = self.root_oid;
@@ -579,7 +520,7 @@ impl<'a> MutContext<'a> {
         }
     }
 
-    pub fn get_oid<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<ObjectId>, TdbError> {
+    fn get_obj<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<ObjectId>, TdbError> {
         // tree is empty
         if self.root_oid == UNUSED_OID {
             return Ok(None);
@@ -605,7 +546,7 @@ impl<'a> MutContext<'a> {
     }
 
     pub fn get<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<&Entry>, TdbError> {
-        if let Some(oid) = self.get_oid(key)? {
+        if let Some(oid) = self.get_obj(key)? {
             Ok(self
                 .obj_modify
                 .get_ref(oid)?
@@ -613,6 +554,66 @@ impl<'a> MutContext<'a> {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn commit(&mut self) -> Result<Arc<Context>, TdbError> {
+        self.obj_modify.commit();
+        // write data log
+        self.data_log_writer.write_obj_log(
+            &self.obj_modify.add_index_objs,
+            &self.obj_modify.add_entry_objs,
+        )?;
+        // make new checkpoint
+        let cp = CheckPoint::new(
+            self.obj_modify.obj_allocater.data_log_remove_len,
+            self.obj_modify.obj_allocater.data_log_len,
+            self.root_oid,
+            self.meta_log_writer.size as u32,
+            self.obj_modify.obj_allocater.get_page_num() as u32,
+            mem::replace(&mut self.obj_modify.meta_logs, Vec::with_capacity(0)),
+        );
+        // write checkpoint
+        match self.meta_log_writer.write_cp(&cp) {
+            Ok(()) => {}
+            Err(TdbError::NoSpace) => {
+                // apply meta log
+                let mut dirty_cache: Vec<ObjectId> = self.obj_modify.dirty_pages.drain().collect();
+                dirty_cache.sort_unstable();
+                for pid in dirty_cache {
+                    let page = self.obj_modify.obj_table.get_page(pid);
+                    self.meta_table_writer.write_page(pid, page)?;
+                }
+                self.meta_table_writer.flush()?;
+                self.meta_log_writer
+                    .write_cp_rename(&cp, &self.dev.meta_log_file_path)?;
+            }
+            Err(e) => return Err(e),
+        }
+        // gc
+        loop {
+            if let Some((ctx, _, _)) = self.gc_ctx.front() {
+                if ctx.strong_count() == 0 {
+                    // clear drop read ctx
+                    let (_, ts, oids) = self.gc_ctx.pop_front().unwrap();
+                    for oid in oids.iter() {
+                        self.obj_modify.obj_table.try_gc(*oid, ts);
+                    }
+                    self.obj_modify.min_ts = ts;
+                }
+            }
+            break;
+        }
+        // push current ctx to gc ctx
+        let ctx = Arc::new(Context {
+            ts: self.obj_modify.ts,
+            root_oid: self.root_oid,
+        });
+        self.gc_ctx.push_back((
+            Arc::downgrade(&ctx),
+            ctx.ts,
+            mem::replace(&mut self.obj_modify.current_gc_ctx, Vec::default()),
+        ));
+        Ok(ctx)
     }
 }
 

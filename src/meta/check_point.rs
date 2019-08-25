@@ -1,8 +1,9 @@
-// use super::{SegementId, SegementInfo};
 use crate::error::TdbError;
+use crate::meta::{PageId, OBJECT_TABLE_ENTRY_PRE_PAGE};
 use crate::object::{ObjectId, UNUSED_OID};
-use crate::storage::{Deserialize, ObjectPos, Serialize,StaticSized};
+use crate::storage::{Deserialize, ObjectPos, Serialize, StaticSized};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::mem;
 use std::u32;
@@ -17,11 +18,56 @@ pub struct CheckPoint {
     pub data_log_remove_len: u64,
     pub data_log_len: u64,
     pub root_oid: ObjectId,
-    // meta log area used size, 0 mean meta log is apply
+    // meta log area used size
     pub meta_log_total_len: u32,
     // meta file len = obj_tablepage_nums  * 4096
     pub obj_tablepage_nums: u32,
     pub obj_changes: Vec<(ObjectId, ObjectPos)>,
+}
+
+impl CheckPoint {
+    pub fn new(
+        data_log_remove_len: u64,
+        data_log_len: u64,
+        root_oid: ObjectId,
+        meta_log_total_len: u32,
+        obj_tablepage_nums: u32,
+        obj_changes: Vec<(ObjectId, ObjectPos)>,
+    ) -> Self {
+        let mut cp = Self {
+            // current checkpoint size,
+            check_point_len: 0,
+            // crc fast
+            crc: u32::MAX,
+            // for gc
+            data_log_remove_len,
+            data_log_len,
+            root_oid,
+            meta_log_total_len,
+            obj_tablepage_nums,
+            obj_changes,
+        };
+        let cp_len = cp.len();
+        cp.check_point_len = cp_len as u32;
+        cp.meta_log_total_len += cp_len as u32;
+        cp
+    }
+
+    pub fn merge(cps: &Vec<CheckPoint>) -> (Vec<(ObjectId, ObjectPos)>, HashSet<PageId>) {
+        let mut changes: HashMap<ObjectId, ObjectPos> = HashMap::default();
+        let mut dirty_pages = HashSet::default();
+        for cp in cps.iter() {
+            for (oid, obj_pos) in cp.obj_changes.iter() {
+                changes.insert(*oid, *obj_pos);
+            }
+        }
+        let mut changes: Vec<(ObjectId, ObjectPos)> = changes.drain().collect();
+        changes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (oid, _) in changes.iter() {
+            dirty_pages.insert(oid / OBJECT_TABLE_ENTRY_PRE_PAGE as u32);
+        }
+        (changes, dirty_pages)
+    }
 }
 
 impl Default for CheckPoint {
@@ -35,7 +81,7 @@ impl Default for CheckPoint {
             data_log_remove_len: 0,
             data_log_len: 0,
             root_oid: UNUSED_OID,
-            // meta log area used size, 0 mean meta log is apply
+            // meta log area used size
             meta_log_total_len: 0,
             // meta file len = obj_tablepage_nums * 4096
             obj_tablepage_nums: 0,
@@ -114,8 +160,7 @@ impl Deserialize for CheckPoint {
         for _ in 0..obj_change_len {
             let oid = reader.read_u32::<LittleEndian>()?;
             let obj_pos = reader.read_u64::<LittleEndian>()?;
-             obj_changes.push((oid, ObjectPos(obj_pos)));
-            
+            obj_changes.push((oid, ObjectPos(obj_pos)));
         }
         Ok(Self {
             check_point_len,
@@ -132,7 +177,7 @@ impl Deserialize for CheckPoint {
 
 #[cfg(test)]
 mod tests {
-    use super::*; 
+    use super::*;
     #[test]
     fn test_checkpoint_size() {
         let mut cp = CheckPoint::default();

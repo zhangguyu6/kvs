@@ -1,65 +1,49 @@
-use crate::object::{MutObject, ObjectId};
-use lru_cache::LruCache;
+use crate::object::{MutObject, Object, ObjectId};
 use std::collections::HashMap;
-use std::mem;
+
 pub struct MutObjectCache {
     dirties: HashMap<ObjectId, MutObject>,
-    cache: LruCache<ObjectId, MutObject>,
 }
 
-impl MutObjectCache {
-    pub fn with_capacity(cap:usize) -> Self {
+impl Default for MutObjectCache {
+    fn default() -> Self {
         Self {
-            dirties:HashMap::new(),
-            cache:LruCache::new(cap)
+            dirties: HashMap::default(),
         }
     }
-} 
+}
 
 // Readonly in cache
 // New/Del/Dirty in dirties
 // There is no intersection between the dirties and cache
-impl  MutObjectCache {
-    //  Return true if oid in cache or in dirties
+impl MutObjectCache {
+    //  Return true if oid in dirties
     pub fn contain(&mut self, oid: ObjectId) -> bool {
-        self.dirties.contains_key(&oid) || self.cache.contains_key(&oid)
+        self.dirties.contains_key(&oid)
     }
     pub fn remove(&mut self, oid: ObjectId) -> Option<MutObject> {
-        let old_obj = self.dirties.remove(&oid);
-        if old_obj.is_some() {
-            return old_obj;
-        } else {
-            self.cache.remove(&oid)
-        }
+        self.dirties.remove(&oid)
     }
     pub fn insert(&mut self, oid: ObjectId, obj_mut: MutObject) -> Option<MutObject> {
+        self.dirties.insert(oid, obj_mut)
+    }
+    pub fn get_mut(&mut self, oid: ObjectId) -> Option<&mut Object> {
+        self.dirties.get_mut(&oid)?.get_mut()
+    }
+    pub fn get_mut_dirty(&mut self, oid: ObjectId) -> Option<&mut Object> {
+        let obj_mut = self.dirties.remove(&oid)?;
         if obj_mut.is_readonly() {
-            assert!(!self.dirties.contains_key(&oid));
-            self.cache.insert(oid, obj_mut)
+            let obj_dirty = obj_mut.to_dirty();
+            self.dirties.insert(oid, obj_dirty);
         } else {
-            let old_obj = self.remove(oid);
             self.dirties.insert(oid, obj_mut);
-            old_obj
         }
+        self.dirties.get_mut(&oid)?.get_mut()
     }
-    pub fn get_mut(&mut self, oid: ObjectId) -> Option<&mut MutObject> {
-        let obj_mut = self.dirties.get_mut(&oid);
-        if obj_mut.is_some() {
-            return obj_mut;
-        }
-        self.cache.get_mut(&oid)
+    pub fn get_ref(&self, oid: ObjectId) -> Option<&Object> {
+        self.dirties.get(&oid)?.get_ref()
     }
-    pub fn get_mut_dirty(&mut self, oid: ObjectId) -> Option<&mut MutObject> {
-        if let Some(obj_mut) = self.cache.remove(&oid) {
-            assert!(obj_mut.is_readonly());
-            let new_obj = obj_mut.to_dirty(); 
-            self.dirties.insert(oid, new_obj);
-        }
-        self.dirties.get_mut(&oid)
-    }
-    pub fn drain(&mut self) -> Box<dyn Iterator<Item = (ObjectId, MutObject)>> {
-        self.cache.clear();
-        Box::new(mem::replace(&mut self.dirties, HashMap::with_capacity(0)).into_iter())
+    pub fn drain(&mut self) -> Vec<(ObjectId, MutObject)> {
+        self.dirties.drain().collect()
     }
 }
- 

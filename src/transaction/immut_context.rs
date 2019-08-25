@@ -1,7 +1,7 @@
 use super::TimeStamp;
-use crate::cache::BackgroundCache;
+use crate::cache::ImMutCache;
 use crate::error::TdbError;
-use crate::meta::ObjectTable;
+use crate::meta::{ObjectAccess, ObjectTable};
 use crate::object::{Object, ObjectId, UNUSED_OID};
 use crate::storage::DataLogFileReader;
 use crate::tree::{Branch, Entry, Leaf};
@@ -10,16 +10,28 @@ use std::borrow::Borrow;
 use std::ops::Range;
 use std::sync::Arc;
 
-pub struct ImmutContext {
-    pub ts: TimeStamp,
+pub struct ImMutContext {
     pub root_oid: ObjectId,
-    pub obj_table: Arc<ObjectTable>,
-    pub cache: BackgroundCache,
-    pub data_file: DataLogFileReader,
+    pub obj_access: ObjectAccess,
+}
+
+impl ImMutContext {
+    pub fn new(
+        root_oid: ObjectId,
+        ts: TimeStamp,
+        obj_table: Arc<ObjectTable>,
+        data_log_reader: DataLogFileReader,
+        cache: ImMutCache,
+    ) -> Self {
+        Self {
+            root_oid,
+            obj_access: ObjectAccess::new(ts, obj_table, data_log_reader, cache),
+        }
+    }
 }
 
 pub struct Iter<'a, K: Borrow<[u8]>> {
-    ctx: &'a mut ImmutContext,
+    ctx: &'a mut ImMutContext,
     path: Vec<(ObjectId, Arc<Object>, usize)>,
     range: Range<&'a K>,
     entry_index: usize,
@@ -35,7 +47,7 @@ impl<'a, K: Borrow<[u8]>> Iter<'a, K> {
                         let mut new_index = index + 1;
                         loop {
                             let new_oid = parent_obj.get_ref::<Branch>().children[new_index];
-                            let new_obj = self.ctx.get_oid(new_oid)?.unwrap();
+                            let new_obj = self.ctx.obj_access.get_arc_obj(new_oid)?.unwrap();
                             self.path.push((new_oid, new_obj.clone(), new_index));
                             if new_obj.is::<Leaf>() {
                                 break;
@@ -85,7 +97,7 @@ impl<'a, K: Borrow<[u8]>> Iterator for Iter<'a, K> {
             }
             let (key, oid) = &leaf_ref.entrys[self.entry_index];
             if key.as_slice() < self.range.end.borrow() {
-                let obj = self.ctx.get_oid(*oid);
+                let obj = self.ctx.obj_access.get_arc_obj(*oid);
                 self.entry_index += 1;
                 match obj {
                     Ok(Some(obj)) => Some(Ok(obj.get_ref::<Entry>().val.clone())),
@@ -105,15 +117,14 @@ impl<'a, K: Borrow<[u8]>> Iterator for Iter<'a, K> {
     }
 }
 
-
-impl ImmutContext {
+impl ImMutContext {
     pub fn get<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<Vec<u8>>, TdbError> {
         if self.root_oid == UNUSED_OID {
             return Ok(None);
         }
         let mut current_oid = self.root_oid;
         loop {
-            if let Some(current_obj) = self.get_oid(current_oid)? {
+            if let Some(current_obj) = self.obj_access.get_arc_obj(current_oid)? {
                 match &*current_obj {
                     Object::E(entry) => {
                         // Notice that , we don't cache entry
@@ -146,7 +157,7 @@ impl ImmutContext {
         let mut entry_index = 0;
         let mut path = vec![];
         loop {
-            if let Some(current_obj) = self.get_oid(current_oid)? {
+            if let Some(current_obj) = self.obj_access.get_arc_obj(current_oid)? {
                 path.push((current_oid, current_obj.clone(), index));
                 match &*current_obj {
                     Object::E(_) => unreachable!(),
@@ -171,26 +182,7 @@ impl ImmutContext {
             entry_index: entry_index,
         }))
     }
-
-    fn get_oid(&mut self, oid: ObjectId) -> Result<Option<Arc<Object>>, TdbError> {
-        if let Some(obj) = self.cache.get(oid, self.ts) {
-            Ok(Some(obj))
-        } else {
-            match self.obj_table.get(oid, self.ts, &mut self.data_file)? {
-                Some(obj) => {
-                    // only cache index node
-                    if !obj.is::<Entry>() {
-                        self.cache.insert(oid, self.ts, obj.clone());
-                    }
-                    Ok(Some(obj))
-                }
-                None => Ok(None),
-            }
-        }
-    }
-
 }
-
 
 // #[cfg(test)]
 // mod tests {

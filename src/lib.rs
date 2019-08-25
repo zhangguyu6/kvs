@@ -2,12 +2,14 @@
 #![feature(weak_counts)]
 #![feature(arbitrary_self_types)]
 #![feature(async_await)]
-mod utils; 
+mod cache;
+mod database;
 mod error;
+mod meta;
+mod object;
+mod storage;
 mod transaction;
 mod tree;
-mod storage;
-mod cache;
-mod object;
-mod meta;
-mod database;
+mod utils;
+
+pub use database::{DataBase, DataBaseReader, DataBaseWriter};

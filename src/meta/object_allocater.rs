@@ -1,13 +1,19 @@
 use crate::meta::{OBJECT_NUM, OBJECT_TABLE_ENTRY_PRE_PAGE};
-use crate::object::{ObjectId, ObjectTag,META_DATA_ALIGN};
-use crate::storage::ObjectPos;
+use crate::object::{Object, ObjectId, ObjectTag, META_DATA_ALIGN};
+use crate::storage::{ObjectPos, StaticSized};
 use crate::utils::BitMap;
 
 pub struct ObjectAllocater {
     pub bitmap: BitMap<u32>,
     last_used: usize,
-    data_log_remove_len: u64,
-    data_log_len: u64,
+    pub data_log_remove_len: u64,
+    pub data_log_len: u64,
+}
+
+impl Default for ObjectAllocater {
+    fn default() -> Self {
+        Self::new(0,0,0)
+    }
 }
 
 impl ObjectAllocater {
@@ -28,17 +34,19 @@ impl ObjectAllocater {
             None
         }
     }
-    pub fn allocate_obj_pos(&mut self, len: u16, tag: ObjectTag) -> ObjectPos {
+    pub fn allocate_obj_pos(&mut self, obj: &Object) -> ObjectPos {
+        let len = obj.static_size();
+        let tag = obj.get_object_info().tag;
         match tag {
-            ObjectTag::Branch | ObjectTag::Leaf => { 
-                if len as usize % META_DATA_ALIGN != 0 
-                { self.data_log_len +=  (META_DATA_ALIGN -  (len as usize % META_DATA_ALIGN)) as u64;
-                } 
-            
-            },
+            ObjectTag::Branch | ObjectTag::Leaf => {
+                if len as usize % META_DATA_ALIGN != 0 {
+                    self.data_log_len +=
+                        (META_DATA_ALIGN - (len as usize % META_DATA_ALIGN)) as u64;
+                }
+            }
             _ => {}
         }
-        let obj_pos = ObjectPos::new(self.data_log_len, len, tag);
+        let obj_pos = ObjectPos::new(self.data_log_len, len as u16, tag);
         self.data_log_len += len as u64;
         obj_pos
     }
@@ -62,6 +70,20 @@ impl ObjectAllocater {
             panic!("obj num more than MAX_OBJECT_NUM ");
         }
         self.bitmap.extend(extend);
+    }
+
+    pub fn get_page_num(&self) -> usize {
+        let mut last_set_oid = None;
+        for i in (0..self.bitmap.get_cap()).rev() {
+            if self.bitmap.get_bit(i) {
+                last_set_oid = Some(i);
+            }
+        }
+        if last_set_oid.is_none() {
+            0
+        } else {
+            (last_set_oid.unwrap() / OBJECT_TABLE_ENTRY_PRE_PAGE) + 1
+        }
     }
 }
 

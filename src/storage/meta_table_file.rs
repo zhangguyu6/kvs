@@ -7,9 +7,10 @@ use crate::object::Versions;
 use crate::storage::{Deserialize, Serialize};
 use crate::utils::Node;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Seek, SeekFrom};
+use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::sync::atomic::Ordering;
 
+const DEFAULT_BUF_SIZE: usize = 4096 * 2;
 pub struct MetaTableFileWriter {
     writer: BufWriter<File>,
 }
@@ -23,10 +24,19 @@ impl From<File> for MetaTableFileWriter {
 }
 
 impl MetaTableFileWriter {
+    pub fn new(file: File) -> Self {
+        Self {
+            writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
+        }
+    }
     pub fn write_page(&mut self, pid: PageId, page: ObjectTablePage) -> Result<(), TdbError> {
         self.writer
             .seek(SeekFrom::Start(pid as u64 * OBJECT_TABLE_PAGE_SIZE as u64))?;
         page.serialize(&mut self.writer)
+    }
+    pub fn flush(&mut self) -> Result<(), TdbError> {
+        self.writer.flush()?;
+        Ok(())
     }
 }
 
@@ -43,13 +53,18 @@ impl From<File> for MetaTableFileReader {
 }
 
 impl MetaTableFileReader {
+    pub fn new(file: File) -> Self {
+        Self {
+            reader: BufReader::with_capacity(DEFAULT_BUF_SIZE, file),
+        }
+    }
     pub fn read_table(
         &mut self,
         cp: &CheckPoint,
     ) -> Result<(ObjectTable, ObjectAllocater), TdbError> {
         self.reader.seek(SeekFrom::Start(0))?;
         let obj_table =
-            ObjectTable::new(cp.obj_tablepage_nums as usize * OBJECT_TABLE_ENTRY_PRE_PAGE);
+            ObjectTable::new(0);
         let mut obj_allocater = ObjectAllocater::new(
             cp.obj_tablepage_nums as usize * OBJECT_TABLE_ENTRY_PRE_PAGE,
             cp.data_log_remove_len,
@@ -67,6 +82,7 @@ impl MetaTableFileReader {
             let old_ptr = page_ptr.swap(Box::into_raw(Box::new(node)), Ordering::SeqCst);
             assert!(old_ptr.is_null());
         }
+        obj_table.extend(cp.obj_tablepage_nums as usize * OBJECT_TABLE_ENTRY_PRE_PAGE);
         Ok((obj_table, obj_allocater))
     }
 }

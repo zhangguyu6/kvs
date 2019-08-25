@@ -61,13 +61,13 @@ impl Versions {
         None
     }
 
-    pub fn get_newest_objpos(&self) -> Option<ObjectPos> {
+    pub fn get_newest_objpos(&self) -> ObjectPos {
          if let Some(_version) = self.history.front() {
             if _version.end_ts == MAX_TS {
-               return Some(_version.obj_pos.clone());
+               return _version.obj_pos.clone();
             }
         }
-        None
+        ObjectPos::default()
     }
 
     pub fn try_clear(&mut self, min_ts: TimeStamp) {
