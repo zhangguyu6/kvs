@@ -153,6 +153,7 @@ impl ObjectTable {
     }
     // Try to extend object table
     // Return old len
+    // TODO change extend to extend_to
     pub fn extend(&self, extend: usize) -> usize {
         self.obj_table_pages.extend_to(extend as u32) as usize
     }

@@ -63,7 +63,7 @@ impl AsBitBlock for u32 {
             }
         }
     }
-    
+    // TODO ADD get last
     #[inline]
     fn ones(&self) -> usize {
         self.count_ones() as usize
