@@ -1,8 +1,5 @@
 use std::u32;
 
-// extend 1,000,000 every time
-const EXTEND_LIMIT: usize = 1 << 15;
-
 pub trait AsBitBlock: Copy {
     fn bits() -> usize;
     fn all_zero() -> Self;
@@ -66,9 +63,12 @@ impl AsBitBlock for u32 {
             }
         }
     }
+    
+    #[inline]
     fn ones(&self) -> usize {
         self.count_ones() as usize
     }
+    #[inline]
     fn zeros(&self) -> usize {
         self.count_zeros() as usize
     }
@@ -326,7 +326,7 @@ mod tests {
             assert_eq!(bitmap.first_zero_with_hint_set(0), Some(i));
         }
         assert_eq!(bitmap.count_zeros(), 0);
-        assert_eq!(bitmap.extend(EXTEND_LIMIT), 32 + (1 << 15) * 32);
+        bitmap.extend(32);
         assert_eq!(bitmap.first_zero_with_hint_set(31), Some(32));
     }
 }

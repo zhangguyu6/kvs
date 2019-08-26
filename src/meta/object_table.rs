@@ -154,7 +154,7 @@ impl ObjectTable {
     // Try to extend object table
     // Return old len
     pub fn extend(&self, extend: usize) -> usize {
-        self.obj_table_pages.extend(extend as u32) as usize
+        self.obj_table_pages.extend_to(extend as u32) as usize
     }
 
     pub fn get_page(&self, pid: PageId) -> ObjectTablePage {
@@ -177,7 +177,8 @@ impl ObjectTable {
     }
 
     pub fn get_page_id(&self, oid: ObjectId) -> PageId {
-        self.obj_table_pages.get_level1_index(oid) as PageId
+        // self.obj_table_pages.get_level1_index(oid) as PageId
+        unimplemented!()
     }
 }
 
