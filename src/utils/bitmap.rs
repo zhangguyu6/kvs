@@ -1,5 +1,5 @@
 use std::u32;
-
+use std::ops::Index;
 pub trait AsBitBlock: Copy {
     fn bits() -> usize;
     fn all_zero() -> Self;
@@ -75,7 +75,7 @@ impl AsBitBlock for u32 {
 }
 
 #[derive(Debug)]
-pub struct BitMap<B> {
+pub struct BitMap<B = u32> {
     bit_blocks: Vec<B>,
     all_bits: usize,
 }
@@ -238,6 +238,7 @@ impl<B: AsBitBlock> BitMap<B> {
         self.all_bits
     }
 }
+
 
 #[cfg(test)]
 mod tests {

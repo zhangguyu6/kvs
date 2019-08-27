@@ -4,6 +4,7 @@ use crate::transaction::{TimeStamp, MAX_TS};
 use std::collections::VecDeque;
 use std::sync::{Arc, Weak};
 
+#[derive(Debug)]
 pub struct ObjectRef {
     // don't own obj, just get ref from cache
     pub obj_ref: Weak<Object>,
@@ -31,6 +32,7 @@ impl ObjectRef {
     }
 }
 
+#[derive(Debug)]
 pub struct Versions {
     pub history: VecDeque<ObjectRef>,
 }

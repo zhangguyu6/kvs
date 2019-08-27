@@ -116,6 +116,9 @@ impl InnerTable {
         self.used_page_num.load(Ordering::SeqCst) as usize
     }
 
+    /// Get object by oid
+    /// # Errors
+    /// Return error if object is not find or I/O error
     pub fn get(
         &self,
         oid: ObjectId,
@@ -141,10 +144,12 @@ impl InnerTable {
                 }
             }
         }
-        Ok(None)
+        Err(TdbError::NotFindObject)
     }
 
-    // Return Ok if no need to gc, Err(oid) for next gc
+    /// Insert object and try to free old version
+    /// # Errors
+    /// Return Err(oid) if object version must be clear next time
     pub fn insert(
         &self,
         oid: ObjectId,
@@ -152,14 +157,67 @@ impl InnerTable {
         min_ts: TimeStamp,
     ) -> Result<(), ObjectId> {
         let mut versions = self.get_writelock(oid);
+        versions.add(version);
         if !versions.is_clear() {
             versions.try_clear(min_ts);
         }
-        versions.add(version);
         if versions.history.len() == 1 {
             Ok(())
         } else {
             Err(oid)
         }
     }
+
+    /// Remove object from table
+    /// # Errors
+    /// Return Err(oid) if object version must be clear next time
+    pub fn remove(&self, oid: ObjectId, ts: TimeStamp, min_ts: TimeStamp) -> Result<(), ObjectId> {
+        let mut versions = self.get_writelock(oid);
+        versions.obsolete_newest(ts);
+        versions.try_clear(min_ts);
+        if versions.is_clear() {
+            Ok(())
+        } else {
+            Err(oid)
+        }
+    }
+
+    /// Try to free old version after insert and remove
+    /// # Errors
+    /// Return Err(oid) if object version must be clear next time
+    pub fn try_gc(&self, oid: ObjectId, min_ts: TimeStamp) -> Result<(), ObjectId> {
+        let mut versions = self.get_writelock(oid);
+        versions.try_clear(min_ts);
+        if versions.is_clear() {
+            Ok(())
+        } else {
+            Err(oid)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::Dev;
+    use crate::tree::Entry;
+    use std::env;
+    #[test]
+    fn test_table() {
+        let dev = Dev::open(env::current_dir().unwrap()).unwrap();
+        let mut data_file = dev.get_data_log_reader().unwrap();
+        let table = InnerTable::new(1);
+        assert!(table.get(0, 0, &mut data_file).is_err());
+        let entry = Entry::default();
+        let obj = Object::E(entry);
+        let arc_obj = Arc::new(obj);
+        let obj_ref = ObjectRef::new(&arc_obj, ObjectPos::default(), 0);
+        assert_eq!(table.insert(0, obj_ref, 0), Ok(()));
+        assert!(table.get(0, 0, &mut data_file).is_ok());
+        let obj_ref = ObjectRef::new(&arc_obj, ObjectPos::default(), 2);
+        assert_eq!(table.insert(0, obj_ref, 1), Err(0));
+        assert_eq!(table.try_gc(0, 2), Ok(()));
+        assert!(table.get(0, 0, &mut data_file).is_err());
+    }
+
 }
