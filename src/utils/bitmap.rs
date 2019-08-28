@@ -1,5 +1,4 @@
 use std::u32;
-use std::ops::Index;
 pub trait AsBitBlock: Copy {
     fn bits() -> usize;
     fn all_zero() -> Self;
@@ -92,11 +91,10 @@ impl<B: AsBitBlock> BitMap<B> {
             all_bits: cap,
         }
     }
-    pub fn extend(&mut self, extend: usize) -> usize {
-        assert!(extend % B::bits() == 0);
-        let new_len = extend / B::bits() + self.bit_blocks.len();
+    pub fn extend_to(&mut self, new_len: usize) -> usize {
+        assert!(new_len >= self.all_bits && new_len % B::bits() == 0);
         self.bit_blocks.resize(new_len, B::all_zero());
-        self.all_bits += extend;
+        self.all_bits += new_len;
         self.all_bits
     }
 
@@ -187,6 +185,20 @@ impl<B: AsBitBlock> BitMap<B> {
         self.first_zero_with_hint(0)
     }
     #[inline]
+    pub fn last_zero(&self) -> Option<usize> {
+        for i in (0..self.bit_blocks.len()).rev() {
+            let bits = self.bit_blocks[i];
+            if bits.zeros() != 0 {
+                for ii in (0..B::bits()).rev() {
+                    if !bits.get_bit(ii) {
+                        return Some(i * B::bits() + ii);
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[inline]
     pub fn first_one_with_hint(&self, hint: usize) -> Option<usize> {
         if self.all_bits == 0 {
             return None;
@@ -232,13 +244,25 @@ impl<B: AsBitBlock> BitMap<B> {
     pub fn first_one(&self) -> Option<usize> {
         self.first_one_with_hint(0)
     }
-
+    #[inline]
+    pub fn last_one(&self) -> Option<usize> {
+        for i in (0..self.bit_blocks.len()).rev() {
+            let bits = self.bit_blocks[i];
+            if bits.ones() != 0 {
+                for ii in (0..B::bits()).rev() {
+                    if bits.get_bit(ii) {
+                        return Some(i * B::bits() + ii);
+                    }
+                }
+            }
+        }
+        None
+    }
     #[inline]
     pub fn get_cap(&self) -> usize {
         self.all_bits
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -327,7 +351,17 @@ mod tests {
             assert_eq!(bitmap.first_zero_with_hint_set(0), Some(i));
         }
         assert_eq!(bitmap.count_zeros(), 0);
-        bitmap.extend(32);
+        bitmap.extend_to(32);
         assert_eq!(bitmap.first_zero_with_hint_set(31), Some(32));
+    }
+
+    #[test]
+    fn test_bitmap_get_last() {
+        let mut bitmap: BitMap<u32> = BitMap::with_capacity(1024);
+        assert_eq!(bitmap.last_one(), None);
+        assert_eq!(bitmap.last_zero(), Some(1023));
+        bitmap.set_bit(1023, true);
+        assert_eq!(bitmap.last_one(), Some(1023));
+        assert_eq!(bitmap.last_zero(), Some(1022));
     }
 }
