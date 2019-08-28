@@ -1,27 +1,28 @@
-use crate::cache::{ImMutCache, MutObjectCache};
+use crate::cache::{ImMutCache, MutCache};
 use crate::error::TdbError;
-use crate::meta::{InnerTable, PageId, OBJ_PRE_PAGE};
+use crate::meta::{InnerTable, PageId, MAX_PAGE_NUM, OBJ_PRE_PAGE};
 use crate::object::{MutObject, Object, ObjectId, ObjectRef};
 use crate::storage::{DataLogFileReader, ObjectPos};
 use crate::transaction::TimeStamp;
 use crate::tree::Entry;
-use bit_vec::BitVec;
+use crate::utils::BitMap;
 use log::debug;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 pub struct MutTable {
-    dirty_cache: MutObjectCache,
+    dirty_cache: MutCache,
     data_reader: DataLogFileReader,
     cache: ImMutCache,
     table: Arc<InnerTable>,
     dirty_pages: HashSet<PageId>,
-    bit: BitVec,
+    bitmap: BitMap,
+    last_oid: ObjectId,
     // add_index_objs: Vec<(ObjectId, Object)>,
     // add_entry_objs: Vec<(ObjectId, Object)>,
     // del_objs: Vec<ObjectId>,
     // meta_logs: Vec<(ObjectId, ObjectPos)>,
-    // current_gc_ctx: Vec<ObjectId>,
+    // current_gc_ctx: Vec<ObjectId>
 }
 
 impl MutTable {
@@ -110,69 +111,113 @@ impl MutTable {
             Err(TdbError::NotFindObject)
         }
     }
-    // Insert Del tag if object is ondisk, otherwise just remove it
-    // pub fn remove(&mut self, oid: ObjectId) -> Option<MutObject> {
-    //     if let Some(mut_obj) = self.dirty_cache.remove(oid) {
-    //         match mut_obj {
-    //             // object is del, do nothing
-    //             MutObject::Del => {
-    //                 self.dirty_cache.insert(oid, MutObject::Del);
-    //                 self.dirty_cache.insert(oid, mut_obj)
-    //             }
-    //             // object is new allcated, just remove it and free oid
-    //             MutObject::New(_) => {
-    //                 // reuse oid
-    //                 self.obj_allocater.free_oid(oid);
-    //                 Some(mut_obj)
-    //             }
-    //             // object is on disk, insert remove tag and free oid
-    //             MutObject::Readonly(_) | MutObject::Dirty(_) => {
-    //                 self.dirty_cache.insert(oid, MutObject::Del);
-    //                 // reuse oid
-    //                 self.obj_allocater.free_oid(oid);
-    //                 Some(mut_obj)
-    //             }
-    //         }
-    //     } else {
-    //         // object is on disk, insert remove tag
-    //         self.dirty_cache.insert(oid, MutObject::Del);
-    //         None
-    //     }
-    // }
+    /// Free oid
+    /// # Panics
+    /// Panics if oid has been released
+    #[inline]
+    fn free_oid(&mut self, oid: ObjectId) {
+        assert_eq!(self.bitmap.get_bit(oid as usize), true);
+        self.bitmap.set_bit(oid as usize, false);
+    }
+    /// Allocate unused oid
+    /// Return None if bitmap is full
+    #[inline]
+    fn allocate_oid(&mut self) -> Option<ObjectId> {
+        if let Some(oid) = self.bitmap.first_zero_with_hint_set(self.last_oid as usize) {
+            self.last_oid = oid as ObjectId;
+            Some(oid as ObjectId)
+        } else {
+            None
+        }
+    }
 
-    // fn free_oid(oid:ObjectId) {
+    /// Remove object if object in dirty_cache and insert Del tag if object is ondisk
+    /// Return old object
+    /// # Notes
+    /// this fn just remove object in dirty cache, not remove it in table
+    pub fn remove(&mut self, oid: ObjectId) -> Option<MutObject> {
+        if let Some(mut_obj) = self.dirty_cache.remove(oid) {
+            match mut_obj {
+                // object is del, do nothing
+                MutObject::Del => {
+                    self.dirty_cache.insert(oid, MutObject::Del);
+                }
+                // object is new allcated, just remove it and free oid
+                MutObject::New(_) => {
+                    // reuse oid
+                    self.free_oid(oid);
+                }
+                // object is on disk, insert remove tag and free oid
+                MutObject::Readonly(_) | MutObject::Dirty(_) => {
+                    self.dirty_cache.insert(oid, MutObject::Del);
+                    // reuse oid
+                    self.free_oid(oid);
+                }
+            }
+            Some(mut_obj)
+        } else {
+            // object is on disk, insert remove tag
+            self.dirty_cache.insert(oid, MutObject::Del);
+            // reuse oid
+            self.free_oid(oid);
+            None
+        }
+    }
 
-    // }
+    /// Insert object to dirty cache
+    /// Return allocated oid
+    /// # Panics
+    /// Panics if there is no unused oid
+    pub fn insert(&mut self, mut obj: Object) -> ObjectId {
+        let oid = match self.allocate_oid() {
+            Some(oid) => oid,
+            None => {
+                let used_page_num = self.table.get_page_num();
+                if used_page_num == MAX_PAGE_NUM {
+                    panic!("allocated page overflow");
+                }
+                self.table.extend_to(used_page_num as PageId + 1);
+                self.bitmap.extend_to((used_page_num + 1) * OBJ_PRE_PAGE);
+                debug!("obj num extend to {:?}", (used_page_num + 1) * OBJ_PRE_PAGE);
+                self.allocate_oid().expect("no enough oid for object")
+            }
+        };
+        obj.get_object_info_mut().oid = oid;
+        if let Some(mut_obj) = self.dirty_cache.remove(oid) {
+            match mut_obj {
+                // object is on disk
+                MutObject::Del | MutObject::Dirty(_) | MutObject::Readonly(_) => {
+                    self.dirty_cache.insert(oid, MutObject::Dirty(obj));
+                }
+                _ => {
+                    self.dirty_cache.insert(oid, MutObject::New(obj));
+                }
+            }
+        } else {
+            self.dirty_cache.insert(oid, MutObject::New(obj));
+        }
+        oid
+    }
 
-    // // Insert New object to dirty cache and Return allocated oid
-    // pub fn insert(&mut self, mut obj: Object) -> ObjectId {
-    //     let oid = match self.obj_allocater.allocate_oid() {
-    //         Some(oid) => oid,
-    //         None => {
-    //             self.obj_allocater.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
-    //             self.obj_table.extend(OBJECT_TABLE_ENTRY_PRE_PAGE);
-    //             debug!("obj allocater extend");
-    //             self.obj_allocater
-    //                 .allocate_oid()
-    //                 .expect("no enough oid for object")
-    //         }
-    //     };
-    //     obj.get_object_info_mut().oid = oid;
-    //     if let Some(mut_obj) = self.dirty_cache.remove(oid) {
-    //         match mut_obj {
-    //             // object is on disk
-    //             MutObject::Del | MutObject::Dirty(_) | MutObject::Readonly(_) => {
-    //                 self.dirty_cache.insert(oid, MutObject::Dirty(obj));
-    //             }
-    //             _ => {
-    //                 self.dirty_cache.insert(oid, MutObject::New(obj));
-    //             }
-    //         }
-    //     } else {
-    //         self.dirty_cache.insert(oid, MutObject::New(obj));
-    //     }
-    //     oid
-    // }
+    /// Apply object change to inner table
+    ///  
+    pub fn apply(&mut self, ts: TimeStamp, min_ts: TimeStamp) -> Vec<ObjectId> {
+        let mut changes = self.dirty_cache.drain();
+        let mut gc_ctx = vec![];
+        for (oid, obj) in changes {
+            match obj {
+                MutObject::Dirty(obj) | MutObject::New(obj) => {
+                    let version = ObjectRef::on_disk(ObjectPos::default(), ts);
+                    match self.table.insert(oid, version, min_ts) {
+                        Ok(()) => {}
+                        Err(oid) => gc_ctx.push(oid),
+                    };
+                }
+                _ => {}
+            }
+        }
+        gc_ctx
+    }
 
     // pub fn commit(&mut self) -> bool {
     //     let mut changes = self.dirty_cache.drain();
@@ -236,10 +281,5 @@ impl MutTable {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::BitMap;
-    #[test]
-    fn test_bitmap() {
-        let mut a: BitMap<u32> = BitMap::with_capacity(1 << 30);
-    }
 
 }
