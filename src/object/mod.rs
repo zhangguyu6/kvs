@@ -1,19 +1,30 @@
-mod object_log;
 mod object_mut;
 mod object_ref;
+mod branch;
+mod entry;
+mod leaf;
+
 use crate::error::TdbError;
-use crate::storage::{Deserialize, Serialize , StaticSized};
-use crate::tree::{Branch, Entry, Leaf};
-pub use object_log::ObjectLog;
+use crate::storage::{Deserialize, Serialize , StaticSized,ObjectPos};
 pub use object_mut::MutObject;
 pub use object_ref::{ObjectRef, Versions};
+pub use branch::Branch;
+pub use entry::Entry;
+pub use leaf::Leaf;
 use std::io::{Read, Write};
 use std::mem;
 use std::u32;
+use std::u8;
+// 255 byte
+pub const MAX_KEY_LEN: u16 = u8::MAX as u16 ;
 // Entry less than 2M
 pub const OBJECT_MAX_SIZE: usize = (1 << 21) as usize;
 pub const UNUSED_OID: u32 = u32::MAX;
 pub const META_DATA_ALIGN:usize = 4096;
+
+pub type Key = Vec<u8>;
+
+pub type Val = Vec<u8>;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Object {
@@ -49,19 +60,19 @@ impl Object {
         T::is(self)
     }
     #[inline]
-    pub fn get_object_info(&self) -> &ObjectInfo {
+    pub fn get_pos(&self) -> &ObjectPos {
         match self {
-            Object::L(leaf) => leaf.get_object_info(),
-            Object::B(branch) => branch.get_object_info(),
-            Object::E(entry) => entry.get_object_info(),
+            Object::L(leaf) => leaf.get_pos(),
+            Object::B(branch) => branch.get_pos(),
+            Object::E(entry) => entry.get_pos(),
         }
     }
     #[inline]
-    pub fn get_object_info_mut(&mut self) -> &mut ObjectInfo {
+    pub fn get_pos_mut(&mut self) -> &mut ObjectPos {
         match self {
-            Object::L(leaf) => leaf.get_object_info_mut(),
-            Object::B(branch) => branch.get_object_info_mut(),
-            Object::E(entry) => entry.get_object_info_mut(),
+            Object::L(leaf) => leaf.get_pos_mut(),
+            Object::B(branch) => branch.get_pos_mut(),
+            Object::E(entry) => entry.get_pos_mut(),
         }
     }
     #[inline]
@@ -73,24 +84,13 @@ impl Object {
         }
     }
     #[inline]
-    pub fn write<W: Write>(&self, buf: &mut W) -> Result<(), TdbError> {
+    pub fn write<W: Write>(&self, buf: &mut W) -> Result<usize, TdbError> {
         match self {
             Object::L(leaf) => leaf.serialize(buf),
             Object::B(branch) => branch.serialize(buf),
             Object::E(entry) => entry.serialize(buf),
         }
     }
-}
-
-impl StaticSized for Object {
-    fn len(&self) -> usize {
-        match self {
-            Object::L(leaf) => leaf.len(),
-            Object::B(branch) => branch.len(),
-            Object::E(entry) => entry.len()
-        }
-    }
-
 }
 
 pub type ObjectId = u32;
@@ -162,8 +162,8 @@ pub trait AsObject: Deserialize + Serialize {
     fn get_ref(obejct_ref: &Object) -> &Self;
     fn get_mut(object_mut: &mut Object) -> &mut Self;
     fn is(obejct_ref: &Object) -> bool;
-    fn get_object_info(&self) -> &ObjectInfo;
-    fn get_object_info_mut(&mut self) -> &mut ObjectInfo;
+    fn get_pos(&self) -> &ObjectPos;
+    fn get_pos_mut(&mut self) -> &mut ObjectPos;
     fn get_header_size() -> usize;
     fn unwrap(obj: Object) -> Self;
 }

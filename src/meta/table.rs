@@ -15,7 +15,7 @@ pub const TABLE_PAGE_SIZE: usize = 1 << 12;
 // 512
 pub const OBJ_PRE_PAGE: usize = TABLE_PAGE_SIZE / mem::size_of::<u64>();
 // 1 << 20
-const MAX_PAGE_NUM: usize = u32::MAX as usize / OBJ_PRE_PAGE;
+pub const MAX_PAGE_NUM: usize = u32::MAX as usize / OBJ_PRE_PAGE;
 
 pub type PageId = u32;
 
@@ -200,7 +200,7 @@ impl InnerTable {
 mod tests {
     use super::*;
     use crate::storage::Dev;
-    use crate::tree::Entry;
+    use crate::object::Entry;
     use std::env;
     #[test]
     fn test_table() {

@@ -1,13 +1,13 @@
 use super::ObjectPos;
 use crate::storage::{Deserialize, StaticSized};
-use crate::tree::{Branch, Entry, Leaf};
 use crate::{
     error::TdbError,
-    object::{Object, ObjectId, ObjectTag, META_DATA_ALIGN},
+    object::{Object, ObjectId, ObjectTag, META_DATA_ALIGN,Branch, Entry, Leaf,MutObject},
 };
 use byteorder::WriteBytesExt;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::collections::hash_map::IterMut;
 
 const DEFAULT_BUF_SIZE: usize = 4096 * 2;
 
@@ -38,32 +38,37 @@ impl DataLogFileReader {
 
 pub struct DataLogFilwWriter {
     writer: BufWriter<File>,
+    size:usize,
 }
 
 impl DataLogFilwWriter {
-    pub fn new(file: File) -> Self {
+    pub fn new(file: File,size:usize) -> Self {
         Self {
             writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
+            size,
         }
     }
-    pub fn write_obj_log(
+    pub fn write_objs(
         &mut self,
-        index_objs: &Vec<(ObjectId, Object)>,
-        entry_objs: &Vec<(ObjectId, Object)>,
-    ) -> Result<(), TdbError> {
-        let mut size = 0;
-        for (_, arc_obj) in index_objs.iter() {
-            size += arc_obj.len();
-            arc_obj.write(&mut self.writer)?;
+        objs:IterMut<ObjectId,MutObject>
+    ) -> Result<usize, TdbError> {
+        for (oid,mut_obj) in objs {
+            match mut_obj {
+                MutObject::Dirty(obj) | MutObject::New(obj) => {
+                    if obj.is::<Entry>() {
+                        obj.get_pos_mut().set_pos(self.size as u64);
+                        self.size += obj.write(&mut self.writer)?;
+                    }
+                }
+                _ => {}
+            }
         }
-        for (_, arc_entry) in entry_objs.iter() {
-            let current_pos = self.writer.seek(SeekFrom::Current(0))?;
-            size += arc_entry.len();
-            arc_entry.write(&mut self.writer)?;
-            let end_pos = self.writer.seek(SeekFrom::Current(0))?;
-            assert_eq!(arc_entry.len() as u64, end_pos - current_pos);
+        if self.size % META_DATA_ALIGN != 0 {
+            for _ in self.size & META_DATA_ALIGN .. META_DATA_ALIGN {
+                self.writer.write_u8(0)?;
+                self.size += 1;
+            }
         }
-        self.writer.flush()?;
-        Ok(())
+        Ok(self.size)
     }
 }

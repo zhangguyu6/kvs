@@ -72,7 +72,7 @@ impl MutContext {
     }
     pub fn insert<K: Into<Key>, V: Into<Val>>(&mut self, key: K, val: V) -> Result<(), TdbError> {
         let key: Key = key.into();
-        assert!(key.len() <= MAX_KEY_LEN);
+        // assert!(key.len() <= MAX_KEY_LEN);
         let val: Val = val.into();
         if let Some(oid) = self.get_obj(&key)? {
             debug!("get oid {:?}", oid);

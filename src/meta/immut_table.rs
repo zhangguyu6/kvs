@@ -1,10 +1,9 @@
 use crate::cache::ImMutCache;
 use crate::error::TdbError;
 use crate::meta::InnerTable;
-use crate::object::{Object, ObjectId};
+use crate::object::{Object, Entry, ObjectId};
 use crate::storage::DataLogFileReader;
 use crate::transaction::TimeStamp;
-use crate::tree::Entry;
 use std::sync::Arc;
 
 pub struct ImMutTable {
@@ -21,7 +20,7 @@ impl ImMutTable {
             cache,
         }
     }
-    pub fn get_obj(&mut self, oid: ObjectId,ts: TimeStamp) -> Result<Arc<Object>, TdbError> {
+    pub fn get_obj(&mut self, oid: ObjectId, ts: TimeStamp) -> Result<Arc<Object>, TdbError> {
         let (pos, obj) = self.table.get(oid, ts, &mut self.data_reader)?;
         if !obj.is::<Entry>() {
             self.cache.insert(pos, obj.clone());

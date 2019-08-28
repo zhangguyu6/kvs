@@ -9,7 +9,6 @@ mod meta;
 mod object;
 mod storage;
 mod transaction;
-mod tree;
 mod utils;
 
 pub use database::{DataBase, DataBaseReader, DataBaseWriter};

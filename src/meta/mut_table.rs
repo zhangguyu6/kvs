@@ -1,10 +1,9 @@
 use crate::cache::{ImMutCache, MutCache};
 use crate::error::TdbError;
 use crate::meta::{InnerTable, PageId, MAX_PAGE_NUM, OBJ_PRE_PAGE};
-use crate::object::{MutObject, Object, ObjectId, ObjectRef};
+use crate::object::{MutObject, Object, ObjectId, ObjectRef,Entry};
 use crate::storage::{DataLogFileReader, ObjectPos};
 use crate::transaction::TimeStamp;
-use crate::tree::Entry;
 use crate::utils::BitMap;
 use log::debug;
 use std::collections::HashSet;
@@ -182,7 +181,6 @@ impl MutTable {
                 self.allocate_oid().expect("no enough oid for object")
             }
         };
-        obj.get_object_info_mut().oid = oid;
         if let Some(mut_obj) = self.dirty_cache.remove(oid) {
             match mut_obj {
                 // object is on disk
@@ -207,8 +205,14 @@ impl MutTable {
         for (oid, obj) in changes {
             match obj {
                 MutObject::Dirty(obj) | MutObject::New(obj) => {
-                    let version = ObjectRef::on_disk(ObjectPos::default(), ts);
+                    let version = ObjectRef::on_disk(obj.get_pos().clone(), ts);
                     match self.table.insert(oid, version, min_ts) {
+                        Ok(()) => {}
+                        Err(oid) => gc_ctx.push(oid),
+                    };
+                }
+                MutObject::Del => {
+                    match self.table.remove(oid, ts,min_ts) {
                         Ok(()) => {}
                         Err(oid) => gc_ctx.push(oid),
                     };
@@ -217,6 +221,12 @@ impl MutTable {
             }
         }
         gc_ctx
+    }
+
+    pub fn gc(&mut self,oids:Vec<ObjectId>,min_ts:TimeStamp) {
+        for oid in oids.iter() {
+            self.table.try_gc(*oid,min_ts);
+        }
     }
 
     // pub fn commit(&mut self) -> bool {

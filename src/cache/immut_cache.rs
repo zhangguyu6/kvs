@@ -1,6 +1,5 @@
-use crate::object::Object;
+use crate::object::{Object,Entry};
 use crate::storage::ObjectPos;
-use crate::tree::Entry;
 use crossbeam::{
     channel::{unbounded, Receiver, Sender, TryRecvError},
     utils::Backoff,

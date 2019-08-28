@@ -1,20 +1,20 @@
 mod dev;
 mod obj_pos;
-mod data_log_file;
-mod meta_log_file;
-mod meta_table_file;
+mod data_file; 
+mod meta_file;
+mod table_file;
 use crate::error::TdbError;
 pub use dev::{Dev};
 pub use obj_pos::{ObjectPos, MAX_DATABASE_SIZE, MAX_OBJECT_SIZE};
-pub use data_log_file::{DataLogFileReader,DataLogFilwWriter};
-pub use meta_log_file::{MetaLogFileReader,MetaLogFileWriter};
-pub use meta_table_file::{MetaTableFileReader,MetaTableFileWriter};
+pub use data_file::{DataLogFileReader,DataLogFilwWriter};
+pub use meta_file::{MetaLogFileReader,MetaLogFileWriter};
+pub use table_file::{MetaTableFileReader,MetaTableFileWriter};
 
 
 use std::io::{Read, Write};
 
 pub trait Serialize {
-    fn serialize<W: Write>(&self, writer: &mut W) -> Result<(), TdbError>;
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<usize, TdbError>;
 }
 
 pub trait Deserialize: Sized {

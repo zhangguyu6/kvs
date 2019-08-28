@@ -48,10 +48,18 @@ impl ObjectPos {
     }
 
     #[inline]
+    pub fn set_pos(&mut self,pos:u64) {
+        self.0 = (self.0 & 0xfffff) + (pos << 20);
+    }
+
+    #[inline]
     pub fn get_len(&self) -> u16 {
         ((self.0 >> 4) & 0xffff) as u16
     }
-
+    #[inline]
+    pub fn set_len(&mut self,size:u16)  {
+        self.0 = (self.0 & ((u64::MAX >> 20 << 20) + 0xf)) + ((size as u64) << 4);
+    }
     #[inline]
     pub fn add_len(&mut self, size: u16) -> u16 {
         let new_len = ((self.0 >> 4) & 0xffff) as u16 + size;
