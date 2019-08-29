@@ -1,37 +1,30 @@
 use crate::error::TdbError;
 use crate::meta::{
-    CheckPoint, ObjectAllocater, ObjectTable, ObjectTablePage, PageId, OBJECT_TABLE_ENTRY_PRE_PAGE,
-    OBJECT_TABLE_PAGE_SIZE,
+    CheckPoint,  PageId,TablePage,TABLE_PAGE_SIZE,InnerTable,OBJ_PRE_PAGE
 };
-use crate::object::Versions;
 use crate::storage::{Deserialize, Serialize};
-use crate::utils::Node;
+use crate::utils::BitMap;
+use byteorder::{LittleEndian, ReadBytesExt};
 use log::debug;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
-use std::sync::atomic::Ordering;
+use std::io::{BufWriter, Seek, SeekFrom, Write,Read};
 
 const DEFAULT_BUF_SIZE: usize = 4096 * 2;
 pub struct MetaTableFileWriter {
     writer: BufWriter<File>,
-    pub obj_tablepage_nums : u32,
 }
 
-
 impl MetaTableFileWriter {
-    pub fn new(file: File,obj_tablepage_nums:u32) -> Self {
+    pub fn new(file: File) -> Self {
         Self {
             writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
-            obj_tablepage_nums
         }
     }
-    pub fn write_page(&mut self, pid: PageId, page: ObjectTablePage) -> Result<(), TdbError> {
-        if (pid+1) > self.obj_tablepage_nums {
-            self.obj_tablepage_nums = pid+1;
-        }
+    pub fn write_page(&mut self, pid: PageId, page: &TablePage) -> Result<(), TdbError> {
         self.writer
-            .seek(SeekFrom::Start(pid as u64 * OBJECT_TABLE_PAGE_SIZE as u64))?;
-        page.serialize(&mut self.writer)
+            .seek(SeekFrom::Start(pid as u64 * TABLE_PAGE_SIZE as u64))?;
+        page.serialize(&mut self.writer)?;
+        Ok(())
     }
     pub fn flush(&mut self) -> Result<(), TdbError> {
         self.writer.flush()?;
@@ -40,13 +33,13 @@ impl MetaTableFileWriter {
 }
 
 pub struct MetaTableFileReader {
-    reader: BufReader<File>,
+    reader: File,
 }
 
 impl From<File> for MetaTableFileReader {
     fn from(file: File) -> Self {
         Self {
-            reader: BufReader::new(file),
+            reader: file,
         }
     }
 }
@@ -54,35 +47,31 @@ impl From<File> for MetaTableFileReader {
 impl MetaTableFileReader {
     pub fn new(file: File) -> Self {
         Self {
-            reader: BufReader::with_capacity(DEFAULT_BUF_SIZE, file),
+            reader: file,
         }
     }
     pub fn read_table(
         &mut self,
         cp: &CheckPoint,
-    ) -> Result<(ObjectTable, ObjectAllocater), TdbError> {
+    ) -> Result<(InnerTable, BitMap), TdbError> {
         debug!("start read table, checkpoint is {:?}",cp);
         self.reader.seek(SeekFrom::Start(0))?;
-        let obj_table =
-            ObjectTable::new(0);
-        let mut obj_allocater = ObjectAllocater::new(
-            cp.obj_tablepage_nums as usize * OBJECT_TABLE_ENTRY_PRE_PAGE,
-            cp.data_log_remove_len,
-            cp.data_log_len,
-        );
-        for pid in 0..cp.obj_tablepage_nums {
-            let obj_table_page = ObjectTablePage::deserialize(&mut self.reader)?;
-            for index in 0..obj_table_page.0.len() {
-                if !obj_table_page.0[index].is_empty() {
-                    obj_allocater.set_bit(pid as usize * OBJECT_TABLE_ENTRY_PRE_PAGE + index, true);
+        let table =InnerTable::new(cp.tablepage_nums as usize);
+        let mut bitmap = BitMap::with_capacity(cp.tablepage_nums as usize * OBJ_PRE_PAGE );
+        let mut buf:[u8;TABLE_PAGE_SIZE] = [0;TABLE_PAGE_SIZE];
+        for pid in 0..cp.tablepage_nums {
+            self.reader.read_exact(&mut buf);
+            let table_page = TablePage::deserialize(&mut &buf[..])?;
+            let _pid = table.append_page(table_page);
+            assert_eq!(_pid ,pid);
+            let buf_reader = &mut &buf[..];
+            for i in 0..OBJ_PRE_PAGE {
+                let pos = buf_reader.read_u64::<LittleEndian>()?;
+                if pos != 0 {
+                    bitmap.set_bit(pid as usize * OBJ_PRE_PAGE + i , true);
                 }
             }
-            let node: Node<Versions> = obj_table_page.into();
-            let page_ptr = obj_table.get_page_ptr(pid);
-            let old_ptr = page_ptr.swap(Box::into_raw(Box::new(node)), Ordering::SeqCst);
-            assert!(old_ptr.is_null());
         }
-        obj_table.extend(cp.obj_tablepage_nums as usize * OBJECT_TABLE_ENTRY_PRE_PAGE);
-        Ok((obj_table, obj_allocater))
+        Ok((table, bitmap))
     }
 }
