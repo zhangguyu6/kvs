@@ -8,6 +8,7 @@ use crate::utils::BitMap;
 use log::debug;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::collections::{hash_map::IterMut} ;
 
 pub struct MutTable {
     dirty_cache: MutCache,
@@ -17,69 +18,55 @@ pub struct MutTable {
     dirty_pages: HashSet<PageId>,
     bitmap: BitMap,
     last_oid: ObjectId,
-    // add_index_objs: Vec<(ObjectId, Object)>,
-    // add_entry_objs: Vec<(ObjectId, Object)>,
-    // del_objs: Vec<ObjectId>,
-    // meta_logs: Vec<(ObjectId, ObjectPos)>,
-    // current_gc_ctx: Vec<ObjectId>
 }
 
 impl MutTable {
-    // pub fn new_empty(file: DataLogFileReader) -> Self {
-    //     Self::new(
-    //         file,
-    //         ObjectTable::default(),
-    //         ObjectAllocater::default(),
-    //         HashSet::default(),
-    //     )
-    // }
+    pub fn new_empty(data_reader: DataLogFileReader) -> Self {
+        Self::new(
+            data_reader,
+            InnerTable::default(),
+            BitMap::default(),
+            HashSet::default(),
+        )
+    }
 
-    // pub fn new(
-    //     file: DataLogFileReader,
-    //     obj_table: ObjectTable,
-    //     obj_allocater: ObjectAllocater,
-    //     dirty_pages: HashSet<PageId>,
-    // ) -> Self {
-    //     let cache = ImMutCache::default();
-    //     let dirty_cache = MutObjectCache::default();
-    //     let ts = 0;
-    //     let min_ts = 0;
-    //     let obj_table = Arc::new(obj_table);
-    //     let add_index_objs = Vec::default();
-    //     let add_entry_objs = Vec::default();
-    //     let del_objs = Vec::default();
-    //     let meta_logs = Vec::default();
-    //     let current_gc_ctx = Vec::default();
-    //     Self {
-    //         cache,
-    //         dirty_cache,
-    //         data_log_reader: file,
-    //         obj_table,
-    //         dirty_pages,
-    //         obj_allocater,
-    //         add_index_objs,
-    //         add_entry_objs,
-    //         del_objs,
-    //         meta_logs,
-    //         current_gc_ctx,
-    //     }
-    // }
-    // Return reference of New/Insert/Ondisk object, None for del object
-    // try to find object_table if not found
+    pub fn new(
+        data_reader: DataLogFileReader,
+        table: InnerTable,
+        bitmap: BitMap,
+        dirty_pages: HashSet<PageId>,
+    ) -> Self {
+        let cache = ImMutCache::default();
+        let dirty_cache = MutCache::default();
+        let table = Arc::new(table);
+        Self {
+            dirty_cache,
+            data_reader,
+            cache,
+            table,
+            dirty_pages,
+            bitmap,
+            last_oid:0
+        }
+    }
+    /// Return reference of New/Insert/Ondisk object, None for del object
+    /// try to find object_table if not found
     pub fn get_ref(&mut self, oid: ObjectId, ts: TimeStamp) -> Result<&Object, TdbError> {
         if !self.dirty_cache.contain(oid) {
-            let (pos, arc_obj) = self.table.get(oid, ts, &mut self.data_reader)?;
+            let (pos, obj) = self.table.get(oid, ts, &mut self.data_reader)?;
 
             debug!(
                 "obj is {:?} offset {:?} len {:?} tag {:?}",
-                arc_obj,
+                obj,
                 pos.get_pos(),
                 pos.get_len(),
                 pos.get_tag(),
             );
             self.dirty_cache
-                .insert(oid, MutObject::Readonly(arc_obj.clone()));
-            self.cache.insert(pos, arc_obj);
+                .insert(oid, MutObject::Readonly(obj.clone()));
+            if !obj.is::<Entry>() {
+            self.cache.insert(pos, obj);
+            }
         }
         if let Some(obj_ref) = self.dirty_cache.get_ref(oid) {
             Ok(obj_ref)
@@ -87,22 +74,24 @@ impl MutTable {
             Err(TdbError::NotFindObject)
         }
     }
-    // Return mut reference of New/Insert/Ondisk object
-    // Not allow to update removed object
+    /// Return mut reference of New/Insert/Ondisk object
+    /// Not allow to update removed object
     pub fn get_mut(&mut self, oid: ObjectId, ts: TimeStamp) -> Result<&mut Object, TdbError> {
         if !self.dirty_cache.contain(oid) {
-            let (pos, arc_obj) = self.table.get(oid, ts, &mut self.data_reader)?;
+            let (pos, obj) = self.table.get(oid, ts, &mut self.data_reader)?;
 
             debug!(
                 "obj is {:?} offset {:?} len {:?} tag {:?} ",
-                arc_obj,
+                obj,
                 pos.get_pos(),
                 pos.get_len(),
                 pos.get_tag(),
             );
             self.dirty_cache
-                .insert(oid, MutObject::Readonly(arc_obj.clone()));
-            self.cache.insert(pos, arc_obj);
+                .insert(oid, MutObject::Readonly(obj.clone()));
+            if !obj.is::<Entry>() {
+            self.cache.insert(pos, obj);
+            }
         }
         if let Some(obj_mut) = self.dirty_cache.get_mut_dirty(oid) {
             Ok(obj_mut)
@@ -198,20 +187,25 @@ impl MutTable {
     }
 
     /// Apply object change to inner table
-    ///  
-    pub fn apply(&mut self, ts: TimeStamp, min_ts: TimeStamp) -> Vec<ObjectId> {
+    /// Return (oids need to gc next time,chaneged objs)
+    pub fn apply(&mut self, ts: TimeStamp, min_ts: TimeStamp) -> (Vec<ObjectId>,Vec<(ObjectId,ObjectPos)>) {
         let mut changes = self.dirty_cache.drain();
         let mut gc_ctx = vec![];
+        let mut obj_changes = vec![];
         for (oid, obj) in changes {
+            // insert dirty pageid by oid
+            self.dirty_pages.insert(InnerTable::get_page_id(oid));
             match obj {
                 MutObject::Dirty(obj) | MutObject::New(obj) => {
                     let version = ObjectRef::on_disk(obj.get_pos().clone(), ts);
+                    obj_changes.push((oid,obj.get_pos().clone()));
                     match self.table.insert(oid, version, min_ts) {
                         Ok(()) => {}
                         Err(oid) => gc_ctx.push(oid),
                     };
                 }
                 MutObject::Del => {
+                    obj_changes.push((oid,ObjectPos::default()));
                     match self.table.remove(oid, ts,min_ts) {
                         Ok(()) => {}
                         Err(oid) => gc_ctx.push(oid),
@@ -220,76 +214,28 @@ impl MutTable {
                 _ => {}
             }
         }
-        gc_ctx
+        (gc_ctx,obj_changes)
     }
 
+    /// Free object if no immut context will see it  
     pub fn gc(&mut self,oids:Vec<ObjectId>,min_ts:TimeStamp) {
         for oid in oids.iter() {
             self.table.try_gc(*oid,min_ts);
         }
     }
 
-    // pub fn commit(&mut self) -> bool {
-    //     let mut changes = self.dirty_cache.drain();
-    //     if changes.is_empty() {
-    //         return false;
-    //     }
-    //     for (oid, obj) in changes.drain(..) {
-    //         match obj {
-    //             MutObject::Dirty(obj) | MutObject::New(obj) => {
-    //                 if obj.is::<Entry>() {
-    //                     self.add_entry_objs.push((oid, obj));
-    //                 } else {
-    //                     self.add_index_objs.push((oid, obj));
-    //                 }
-    //             }
-    //             MutObject::Del => {
-    //                 self.del_objs.push(oid);
-    //             }
-    //             MutObject::Readonly(_) => {}
-    //         }
-    //     }
-    //     // insert branch leaf
-    //     for (oid, obj) in self.add_index_objs.iter() {
-    //         let obj_pos = self.obj_allocater.allocate_obj_pos(obj);
-    //         debug!("pos {:?}", obj_pos.get_pos());
-    //         let obj_ref = ObjectRef::on_disk(obj_pos, self.ts);
-    //         match self.obj_table.insert(*oid, obj_ref, self.min_ts) {
-    //             Ok(()) => {}
-    //             Err(oid) => self.current_gc_ctx.push(oid),
-    //         }
-    //         self.meta_logs.push((*oid, obj_pos));
-    //     }
-    //     // insert entry
-    //     for (oid, obj) in self.add_entry_objs.iter() {
-    //         debug!("entry is {:?}", obj);
-    //         let obj_pos = self.obj_allocater.allocate_obj_pos(obj);
-    //         debug!("pos {:?} tag {:?}", obj_pos.get_pos(), obj_pos.get_tag());
-    //         let obj_ref = ObjectRef::on_disk(obj_pos, self.ts);
-    //         match self.obj_table.insert(*oid, obj_ref, self.min_ts) {
-    //             Ok(()) => {}
-    //             Err(oid) => self.current_gc_ctx.push(oid),
-    //         }
-    //         self.meta_logs.push((*oid, obj_pos));
-    //     }
-    //     // del
-    //     for oid in self.del_objs.drain(..) {
-    //         match self.obj_table.remove(oid, self.ts, self.min_ts) {
-    //             Ok(()) => {}
-    //             Err(oid) => self.current_gc_ctx.push(oid),
-    //         }
-    //         self.meta_logs.push((oid, ObjectPos::default()));
-    //     }
-    //     // insert dirty meta log
-    //     for (oid, _) in self.meta_logs.iter() {
-    //         let pid = self.obj_table.get_page_id(*oid);
-    //         self.dirty_pages.insert(pid);
-    //     }
-    //     true
-    // }
-}
+    /// Return toal remove size in this write transcation
+    #[inline]
+    pub fn get_removed_size(&self) -> u64 {
+        self.dirty_cache.get_removed_size()
+    }
 
-#[cfg(test)]
-mod tests {
+    /// Return all changed obj in mut iter, DataFileWriter should used this iter and change obj's pos 
+    #[inline]
+    pub fn obj_iter_mut(&mut self) -> IterMut<ObjectId,MutObject> {
+        self.dirty_cache.iter_mut()
+    }
+
 
 }
+
