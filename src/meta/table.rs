@@ -1,13 +1,15 @@
 use crate::error::TdbError;
 use crate::object::{Object, ObjectId, ObjectRef, Versions};
-use crate::storage::{DataLogFileReader, ObjectPos};
+use crate::storage::{DataLogFileReader, ObjectPos, Deserialize, Serialize};
 use crate::transaction::TimeStamp;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::mem;
 use std::sync::{
     atomic::{AtomicPtr, AtomicU32, Ordering},
     Arc,
 };
+use std::io::{Read, Write};
 use std::u32;
 
 // 4K
@@ -34,9 +36,41 @@ impl Default for TablePage {
     }
 }
 
+impl Serialize for TablePage {
+    fn serialize<W: Write>(&self, writer: &mut W) -> Result<usize, TdbError> {
+        let mut size = 0;
+        for versions in self.children.iter() {
+            let pos = versions.read().get_newest_objpos();
+            writer.write_u64::<LittleEndian>(pos.0)?;
+            size += mem::size_of::<u64>();
+        }
+        assert_eq!(size,TABLE_PAGE_SIZE);
+        Ok(size)
+    }
+}
+
+impl Deserialize for TablePage {
+    fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
+        let mut children = Vec::with_capacity(OBJ_PRE_PAGE);
+        for _ in 0..OBJ_PRE_PAGE {
+            let pos = ObjectPos(reader.read_u64::<LittleEndian>()?);
+            let versions = Versions::new_only(ObjectRef::on_disk(pos,0)); 
+            children.push(RwLock::new(versions));
+        }
+        Ok(Self{children})
+    }
+}
+
+
 pub struct InnerTable {
     pages: Vec<AtomicPtr<TablePage>>,
     used_page_num: AtomicU32,
+}
+
+impl Default for InnerTable {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 impl InnerTable {
@@ -58,6 +92,24 @@ impl InnerTable {
     #[inline]
     fn get_page_ptr(&self, pid: PageId) -> &AtomicPtr<TablePage> {
         &self.pages[pid as usize]
+    }
+
+    #[inline]
+    pub fn append_page(&self,page:TablePage) -> PageId {
+        let pid = self.used_page_num.load(Ordering::SeqCst);
+        let old_ptr = self.pages[pid as usize].swap(Box::into_raw(Box::new(page)), Ordering::SeqCst);
+        assert!(old_ptr.is_null());
+        self.used_page_num.fetch_add(1,Ordering::SeqCst);
+        pid
+    }
+    /// Return table page ref by pageid
+    /// # Panics
+    /// Panics if page is not initialized
+    #[inline]
+    pub fn get_page_ref(&self,pid:PageId) -> &TablePage {
+        let page_ptr = self.pages[pid as usize].load(Ordering::SeqCst);
+        assert!(!page_ptr.is_null());
+        unsafe { &*page_ptr}
     }
 
     #[inline]
