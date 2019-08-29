@@ -1,7 +1,7 @@
 use crate::error::TdbError;
 use crate::meta::{PageId, OBJ_PRE_PAGE};
 use crate::object::{ObjectId, UNUSED_OID};
-use crate::storage::{Deserialize, ObjectPos, Serialize, StaticSized};
+use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
@@ -11,45 +11,45 @@ use std::u32;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CheckPoint {
     // current checkpoint size,
-    pub check_point_len: u32,
+    pub size: u32,
     // crc fast
     pub crc: u32,
     // for gc
-    pub data_log_remove_len: u64,
-    pub data_log_len: u64,
+    pub data_remove_size: u64,
+    pub data_size: u64,
     pub root_oid: ObjectId,
     // meta log area used size
-    pub meta_log_total_len: u32,
-    // meta file len = obj_tablepage_nums  * 4096
-    pub obj_tablepage_nums: u32,
+    pub meta_size: u32,
+    // meta file len = tablepage_nums  * 4096
+    pub tablepage_nums: u32,
     pub obj_changes: Vec<(ObjectId, ObjectPos)>,
 }
 
 impl CheckPoint {
     pub fn new(
-        data_log_remove_len: u64,
-        data_log_len: u64,
+        data_remove_size: u64,
+        data_size: u64,
         root_oid: ObjectId,
-        meta_log_total_len: u32,
-        obj_tablepage_nums: u32,
+        meta_size: u32,
+        tablepage_nums: u32,
         obj_changes: Vec<(ObjectId, ObjectPos)>,
     ) -> Self {
         let mut cp = Self {
             // current checkpoint size,
-            check_point_len: 0,
+            size: 0,
             // crc fast
             crc: u32::MAX,
             // for gc
-            data_log_remove_len,
-            data_log_len,
+            data_remove_size,
+            data_size,
             root_oid,
-            meta_log_total_len,
-            obj_tablepage_nums,
+            meta_size,
+            tablepage_nums,
             obj_changes,
         };
         let cp_len = cp.len();
-        cp.check_point_len = cp_len as u32;
-        cp.meta_log_total_len += cp_len as u32;
+        cp.size = cp_len as u32;
+        cp.meta_size += cp_len as u32;
         cp
     }
 
@@ -70,20 +70,20 @@ impl CheckPoint {
     }
 
     #[inline]
-    fn len(&self) -> usize {
-        // check_point_len
+    pub fn len(&self) -> usize {
+        // size
         mem::size_of::<u32>()
         // crc 32
         + mem::size_of::<u32>()
-        // data_log_remove_len
+        // data_remove_size
             + mem::size_of::<u64>()
-            // data_log_len
+            // datasizen
             + mem::size_of::<u64>()
             // root_oid
             + mem::size_of::<u32>()
-            // meta_log_total_len
+            // meta_size
             + mem::size_of::<u32>()
-            // obj_tablepage_nums 
+            // tablepage_nums 
             + mem::size_of::<u32>()
             // obj_changes len
             + mem::size_of::<u32>()
@@ -96,22 +96,22 @@ impl Default for CheckPoint {
     fn default() -> Self {
         let mut cp = Self {
             // current checkpoint size,
-            check_point_len: 0,
+            size: 0,
             // crc fast
             crc: u32::MAX,
             // for gc
-            data_log_remove_len: 0,
-            data_log_len: 0,
+            data_remove_size: 0,
+            data_size: 0,
             root_oid: UNUSED_OID,
             // meta log area used size
-            meta_log_total_len: 0,
-            // meta file len = obj_tablepage_nums * 4096
-            obj_tablepage_nums: 0,
+            meta_size: 0,
+            // meta file len = tablepage_nums * 4096
+            tablepage_nums: 0,
             obj_changes: Vec::with_capacity(0),
         };
         let cp_len = cp.len();
-        cp.check_point_len = cp_len as u32;
-        cp.meta_log_total_len = cp_len as u32;
+        cp.size = cp_len as u32;
+        cp.meta_size = cp_len as u32;
         cp
     }
 }
@@ -119,13 +119,13 @@ impl Default for CheckPoint {
 
 impl Serialize for CheckPoint {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<usize, TdbError> {
-        writer.write_u32::<LittleEndian>(self.check_point_len)?;
+        writer.write_u32::<LittleEndian>(self.size)?;
         writer.write_u32::<LittleEndian>(self.crc)?;
-        writer.write_u64::<LittleEndian>(self.data_log_remove_len)?;
-        writer.write_u64::<LittleEndian>(self.data_log_len)?;
+        writer.write_u64::<LittleEndian>(self.data_remove_size)?;
+        writer.write_u64::<LittleEndian>(self.data_size)?;
         writer.write_u32::<LittleEndian>(self.root_oid)?;
-        writer.write_u32::<LittleEndian>(self.meta_log_total_len)?;
-        writer.write_u32::<LittleEndian>(self.obj_tablepage_nums)?;
+        writer.write_u32::<LittleEndian>(self.meta_size)?;
+        writer.write_u32::<LittleEndian>(self.tablepage_nums)?;
         writer.write_u32::<LittleEndian>(self.obj_changes.len() as u32)?;
         for i in 0..self.obj_changes.len() {
             writer.write_u32::<LittleEndian>(self.obj_changes[i].0)?;
@@ -137,19 +137,19 @@ impl Serialize for CheckPoint {
 
 impl Deserialize for CheckPoint {
     fn deserialize<R: Read>(reader: &mut R) -> Result<Self, TdbError> {
-        let check_point_len = reader.read_u32::<LittleEndian>()?;
-        if check_point_len == 0 {
+        let size = reader.read_u32::<LittleEndian>()?;
+        if size == 0 {
             return Err(TdbError::SerializeError);
         }
         let crc = reader.read_u32::<LittleEndian>()?;
         if crc != u32::MAX {
             return Err(TdbError::SerializeError);
         }
-        let data_log_remove_len = reader.read_u64::<LittleEndian>()?;
-        let data_log_len = reader.read_u64::<LittleEndian>()?;
+        let data_remove_size = reader.read_u64::<LittleEndian>()?;
+        let data_size = reader.read_u64::<LittleEndian>()?;
         let root_oid = reader.read_u32::<LittleEndian>()?;
-        let meta_log_total_len = reader.read_u32::<LittleEndian>()?;
-        let obj_tablepage_nums = reader.read_u32::<LittleEndian>()?;
+        let meta_size = reader.read_u32::<LittleEndian>()?;
+        let tablepage_nums = reader.read_u32::<LittleEndian>()?;
         let obj_change_len = reader.read_u32::<LittleEndian>()? as usize;
         let mut obj_changes = Vec::with_capacity(obj_change_len);
         for _ in 0..obj_change_len {
@@ -158,13 +158,13 @@ impl Deserialize for CheckPoint {
             obj_changes.push((oid, ObjectPos(obj_pos)));
         }
         Ok(Self {
-            check_point_len,
+            size,
             crc,
-            data_log_remove_len,
-            data_log_len,
+            data_remove_size,
+            data_size,
             root_oid,
-            meta_log_total_len,
-            obj_tablepage_nums,
+            meta_size,
+            tablepage_nums,
             obj_changes,
         })
     }
