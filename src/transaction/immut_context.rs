@@ -1,37 +1,34 @@
 use super::TimeStamp;
-use crate::cache::ImMutCache;
 use crate::error::TdbError;
-use crate::meta::{ObjectAccess, ObjectTable};
-use crate::object::{Object, ObjectId, UNUSED_OID};
-use crate::storage::DataLogFileReader;
-use crate::tree::{Branch, Entry, Leaf};
+use crate::meta::ImMutTable;
+use crate::object::{Object, ObjectId, UNUSED_OID,Branch, Entry, Leaf};
 
 use std::borrow::Borrow;
 use std::ops::Range;
 use std::sync::Arc;
 
 pub struct ImMutContext {
-    pub root_oid: ObjectId,
-    pub obj_access: ObjectAccess,
+    root_oid: ObjectId,
+    table: ImMutTable,
+    ts:TimeStamp,
 }
 
 impl ImMutContext {
     pub fn new(
         root_oid: ObjectId,
         ts: TimeStamp,
-        obj_table: Arc<ObjectTable>,
-        data_log_reader: DataLogFileReader,
-        cache: ImMutCache,
+        table:ImMutTable
     ) -> Self {
         Self {
             root_oid,
-            obj_access: ObjectAccess::new(ts, obj_table, data_log_reader, cache),
+            table,
+            ts,
         }
     }
 }
 
 pub struct Iter<'a, K: Borrow<[u8]>> {
-    ctx: &'a mut ImMutContext,
+    ctx: &'a ImMutContext,
     path: Vec<(ObjectId, Arc<Object>, usize)>,
     range: Range<&'a K>,
     entry_index: usize,
@@ -47,7 +44,7 @@ impl<'a, K: Borrow<[u8]>> Iter<'a, K> {
                         let mut new_index = index + 1;
                         loop {
                             let new_oid = parent_obj.get_ref::<Branch>().children[new_index];
-                            let new_obj = self.ctx.obj_access.get_arc_obj(new_oid)?.unwrap();
+                            let new_obj = self.ctx.table.get_obj(new_oid,self.ctx.ts)?;
                             self.path.push((new_oid, new_obj.clone(), new_index));
                             if new_obj.is::<Leaf>() {
                                 break;
@@ -96,18 +93,14 @@ impl<'a, K: Borrow<[u8]>> Iterator for Iter<'a, K> {
                 }
             }
             let (key, oid) = &leaf_ref.entrys[self.entry_index];
-            if key.as_slice() < self.range.end.borrow() {
-                let obj = self.ctx.obj_access.get_arc_obj(*oid);
+            if key.as_slice() <= self.range.end.borrow() {
+                let obj = self.ctx.table.get_obj(*oid,self.ctx.ts);
                 self.entry_index += 1;
                 match obj {
-                    Ok(Some(obj)) => Some(Ok(obj.get_ref::<Entry>().val.clone())),
+                    Ok(obj) => Some(Ok(obj.get_ref::<Entry>().val.clone())),
                     Err(err) => {
                         self.path.clear();
                         Some(Err(err))
-                    }
-                    Ok(None) => {
-                        self.path.clear();
-                        Some(Err(TdbError::NotFindObject))
                     }
                 }
             } else {
@@ -118,13 +111,14 @@ impl<'a, K: Borrow<[u8]>> Iterator for Iter<'a, K> {
 }
 
 impl ImMutContext {
-    pub fn get<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<Vec<u8>>, TdbError> {
+    pub fn get<K: Borrow<[u8]>>(&self, key: &K) -> Result<Option<Vec<u8>>, TdbError> {
         if self.root_oid == UNUSED_OID {
             return Ok(None);
         }
         let mut current_oid = self.root_oid;
         loop {
-            if let Some(current_obj) = self.obj_access.get_arc_obj(current_oid)? {
+            let current_obj = self.table.get_obj(current_oid,self.ts)?;
+             
                 match &*current_obj {
                     Object::E(entry) => {
                         // Notice that , we don't cache entry
@@ -139,14 +133,61 @@ impl ImMutContext {
                         current_oid = oid;
                     }
                 }
-            } else {
-                return Err(TdbError::NotFindObject);
-            }
+             
         }
     }
 
+    pub fn get_min(&self) -> Result<Option<(Vec<u8>,Vec<u8>)>,TdbError> {
+        if self.root_oid == UNUSED_OID {
+            return Ok(None);
+        }
+        let mut current_oid = self.root_oid;
+        loop {
+            let current_obj = self.table.get_obj(current_oid,self.ts)?;
+                match &*current_obj {
+                    Object::E(entry) => {
+                        // Notice that , we don't cache entry
+                        return Ok(Some((entry.key.clone(),entry.val.clone())));
+                    }
+                    Object::L(leaf) => {
+                        current_oid = leaf.entrys[0].1;
+                    },
+                    Object::B(branch) => {
+                        current_oid = branch.children[0];
+                    }
+                }
+             
+        }
+    }
+
+    
+    pub fn get_max(&self) -> Result<Option<(Vec<u8>,Vec<u8>)>,TdbError> {
+        if self.root_oid == UNUSED_OID {
+            return Ok(None);
+        }
+        let mut current_oid = self.root_oid;
+        loop {
+            let current_obj = self.table.get_obj(current_oid,self.ts)?;
+                match &*current_obj {
+                    Object::E(entry) => {
+                        // Notice that , we don't cache entry
+                        return Ok(Some((entry.key.clone(),entry.val.clone())));
+                    }
+                    Object::L(leaf) => {
+                        current_oid = leaf.entrys.last().unwrap().1;
+                    },
+                    Object::B(branch) => {
+                        current_oid = *branch.children.last().unwrap();
+                    }
+                }
+             
+        }
+    }
+
+
+
     pub fn range<'a, K: Borrow<[u8]>>(
-        &'a mut self,
+        &'a self,
         range: Range<&'a K>,
     ) -> Result<Option<Iter<'a, K>>, TdbError> {
         if self.root_oid == UNUSED_OID {
@@ -157,7 +198,8 @@ impl ImMutContext {
         let mut entry_index = 0;
         let mut path = vec![];
         loop {
-            if let Some(current_obj) = self.obj_access.get_arc_obj(current_oid)? {
+             let current_obj = self.table.get_obj(current_oid,self.ts)?;
+              
                 path.push((current_oid, current_obj.clone(), index));
                 match &*current_obj {
                     Object::E(_) => unreachable!(),
@@ -171,9 +213,7 @@ impl ImMutContext {
                         break;
                     }
                 }
-            } else {
-                return Err(TdbError::NotFindObject);
-            }
+            
         }
         Ok(Some(Iter {
             ctx: self,
@@ -198,18 +238,18 @@ impl ImMutContext {
 //         let dev = BlockDev::new(dummy);
 //         let obj_table = ObjectTable::with_capacity(1 << 16);
 //         let cache = BackgroundCacheInner::new(32);
-//         let obj_access = ObjectAccess {
+//         let table = ObjectAccess {
 //             ts: 0,
 //             cache: &cache,
 //             dev: &dev,
 //             obj_table: &obj_table,
 //         };
-//         assert_eq!(obj_access.get(0), None);
+//         assert_eq!(table.get(0), None);
 //         let arc_entry = Arc::new(Object::E(Entry::new(vec![1], vec![1], 1)));
 //         let pos = ObjectPos::default();
 //         let obj_ref = ObjectRef::new(&arc_entry, pos, 0);
 //         obj_table.insert(1, obj_ref, 0);
-//         assert_eq!(obj_access.get(1).unwrap(), arc_entry);
+//         assert_eq!(table.get(1).unwrap(), arc_entry);
 //         cache.close();
 //     }
 // }
@@ -228,7 +268,7 @@ impl ImMutContext {
 //         let dev = BlockDev::new(dummy);
 //         let obj_table = ObjectTable::with_capacity(1 << 16);
 //         let cache = BackgroundCacheInner::new(32);
-//         let obj_access = ObjectAccess {
+//         let table = ObjectAccess {
 //             ts: 0,
 //             cache: &cache,
 //             dev: &dev,
@@ -276,7 +316,7 @@ impl ImMutContext {
 //         obj_table.insert(7, obj7, 0);
 
 //         let tree_reader = TreeReader {
-//             obj_access: obj_access,
+//             table: table,
 //             root_oid: 7,
 //         };
 

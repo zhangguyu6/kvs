@@ -5,7 +5,7 @@ mod entry;
 mod leaf;
 
 use crate::error::TdbError;
-use crate::storage::{Deserialize, Serialize , StaticSized,ObjectPos};
+use crate::storage::{Deserialize, Serialize ,ObjectPos};
 pub use object_mut::MutObject;
 pub use object_ref::{ObjectRef, Versions};
 pub use branch::Branch;
@@ -15,10 +15,10 @@ use std::io::{Read, Write};
 use std::mem;
 use std::u32;
 use std::u8;
+use std::u16;
 // 255 byte
 pub const MAX_KEY_LEN: u16 = u8::MAX as u16 ;
-// Entry less than 2M
-pub const OBJECT_MAX_SIZE: usize = (1 << 21) as usize;
+pub const OBJECT_MAX_SIZE: u16 = u16::MAX ;
 pub const UNUSED_OID: u32 = u32::MAX;
 pub const META_DATA_ALIGN:usize = 4096;
 
@@ -151,7 +151,7 @@ impl From<u64> for ObjectInfo {
 
 impl Into<u64> for ObjectInfo {
     fn into(self) -> u64 {
-        assert!(self.size <= OBJECT_MAX_SIZE);
+        assert!(self.size <= OBJECT_MAX_SIZE as usize);
         self.oid as u64 + ((self.tag as u8 as u64) << 32) + ((self.size as u64) << 40)
     }
 }
@@ -218,7 +218,7 @@ mod tests {
         let obj_info = ObjectInfo {
             oid: 4,
             tag: ObjectTag::Entry,
-            size: OBJECT_MAX_SIZE,
+            size: OBJECT_MAX_SIZE as usize,
         };
         let val: u64 = obj_info.clone().into();
         assert_eq!(obj_info, ObjectInfo::from(val));

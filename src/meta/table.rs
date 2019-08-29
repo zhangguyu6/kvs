@@ -1,6 +1,6 @@
 use crate::error::TdbError;
 use crate::object::{Object, ObjectId, ObjectRef, Versions};
-use crate::storage::{DataLogFileReader, ObjectPos, Deserialize, Serialize};
+use crate::storage::{DataFileReader, ObjectPos, Deserialize, Serialize};
 use crate::transaction::TimeStamp;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -175,7 +175,7 @@ impl InnerTable {
         &self,
         oid: ObjectId,
         ts: TimeStamp,
-        file: &mut DataLogFileReader,
+        file: &mut DataFileReader,
     ) -> Result<(ObjectPos, Arc<Object>), TdbError> {
         let read_versions = self.get_readlock(oid);
         if let Some(obj_ref) = read_versions.find_obj_ref(ts) {
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn test_table() {
         let dev = Dev::open(env::current_dir().unwrap()).unwrap();
-        let mut data_file = dev.get_data_log_reader().unwrap();
+        let mut data_file = dev.get_data_reader().unwrap();
         let table = InnerTable::new(1);
         assert!(table.get(0, 0, &mut data_file).is_err());
         let entry = Entry::default();

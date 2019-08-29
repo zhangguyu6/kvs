@@ -1,5 +1,5 @@
 use super::ObjectPos;
-use crate::storage::{Deserialize, StaticSized};
+use crate::storage::{Deserialize};
 use crate::{
     error::TdbError,
     object::{Object, ObjectId, ObjectTag, META_DATA_ALIGN,Branch, Entry, Leaf,MutObject},
@@ -11,13 +11,13 @@ use std::collections::hash_map::IterMut;
 
 const DEFAULT_BUF_SIZE: usize = 4096 * 2;
 
-pub struct DataLogFileReader {
+pub struct DataFileReader {
     reader: BufReader<File>,
 }
 
-impl DataLogFileReader {
+impl DataFileReader {
     pub fn new(file: File) -> Self {
-        Self {
+        DataFileReader {
             reader: BufReader::with_capacity(DEFAULT_BUF_SIZE, file),
         }
     }
@@ -36,14 +36,14 @@ impl DataLogFileReader {
     }
 }
 
-pub struct DataLogFilwWriter {
+pub struct DataFilwWriter {
     writer: BufWriter<File>,
     size:usize,
 }
 
-impl DataLogFilwWriter {
+impl DataFilwWriter {
     pub fn new(file: File,size:usize) -> Self {
-        Self {
+        DataFilwWriter {
             writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
             size,
         }
@@ -55,10 +55,8 @@ impl DataLogFilwWriter {
         for (oid,mut_obj) in objs {
             match mut_obj {
                 MutObject::Dirty(obj) | MutObject::New(obj) => {
-                    if obj.is::<Entry>() {
                         obj.get_pos_mut().set_pos(self.size as u64);
                         self.size += obj.write(&mut self.writer)?;
-                    }
                 }
                 _ => {}
             }

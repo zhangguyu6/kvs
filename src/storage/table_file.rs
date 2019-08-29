@@ -10,13 +10,13 @@ use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write,Read};
 
 const DEFAULT_BUF_SIZE: usize = 4096 * 2;
-pub struct MetaTableFileWriter {
+pub struct TableFileWriter {
     writer: BufWriter<File>,
 }
 
-impl MetaTableFileWriter {
+impl TableFileWriter {
     pub fn new(file: File) -> Self {
-        Self {
+        TableFileWriter {
             writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
         }
     }
@@ -32,21 +32,21 @@ impl MetaTableFileWriter {
     }
 }
 
-pub struct MetaTableFileReader {
+pub struct TableFileReader {
     reader: File,
 }
 
-impl From<File> for MetaTableFileReader {
+impl From<File> for TableFileReader {
     fn from(file: File) -> Self {
-        Self {
+        TableFileReader {
             reader: file,
         }
     }
 }
 
-impl MetaTableFileReader {
+impl TableFileReader {
     pub fn new(file: File) -> Self {
-        Self {
+        TableFileReader {
             reader: file,
         }
     }

@@ -10,21 +10,21 @@ pub const META_LOG_FILE_MAX_SIZE: usize = 1 << 21;
 
 const DEFAULT_BUF_SIZE: usize = 4096;
 
-pub struct MetaLogFileWriter {
+pub struct MetaFileWriter {
     writer: BufWriter<File>,
-    pub size: usize,
+    size: usize,
 }
 
-impl MetaLogFileWriter {
+impl MetaFileWriter {
     pub fn new(file: File, size: usize) -> Self {
-        Self {
+        MetaFileWriter {
             writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
             size: size,
         }
     }
     /// Write checkpoint to meta file
     /// Return true if should apply
-    pub fn write_cp(&mut self, mut cp: CheckPoint) -> Result<bool, TdbError> {
+    pub fn write_cp(&mut self, cp:&mut CheckPoint) -> Result<bool, TdbError> {
         self.size += cp.len();
         cp.meta_size = self.size as u32;
         cp.serialize(&mut self.writer)?;

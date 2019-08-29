@@ -1,6 +1,6 @@
 use crate::cache::ImMutCache;
 use crate::error::TdbError;
-use crate::meta::{CheckPoint, ObjectTable, OBJECT_TABLE_ENTRY_PRE_PAGE};
+use crate::meta::{CheckPoint, };
 use crate::object::{ObjectId, ObjectRef, UNUSED_OID};
 use crate::storage::Dev;
 use crate::transaction::{ImMutContext, Iter, MutContext, TimeStamp};
@@ -85,7 +85,7 @@ impl DataBase {
     pub fn get_reader(&self) -> Result<DataBaseReader, TdbError> {
         let ctx = self.global_ctx.read().clone();
         let obj_table = self.obj_table.clone();
-        let data_log_reader = self.dev.get_data_log_reader()?;
+        let data_log_reader = self.dev.get_data_reader()?;
         let cache = self.immut_cache.clone();
         let immut_ctx = ImMutContext::new(ctx.root_oid, ctx.ts, obj_table, data_log_reader, cache);
         Ok(DataBaseReader(immut_ctx, ctx))
@@ -99,7 +99,7 @@ impl DataBase {
         info!("open database at {:?}", dir_path.as_ref());
         let dev = Dev::open(dir_path)?;
 
-        let mut meta_log_reader = dev.get_meta_log_reader()?;
+        let mut meta_log_reader = dev.get_meta_reader()?;
         let mut checkpoints = meta_log_reader.read_cps()?;
         if checkpoints.is_empty() {
             debug!("checkpoint is empty, create empty database");
@@ -116,7 +116,7 @@ impl DataBase {
             let (changes, dirty_pages) = CheckPoint::merge(&checkpoints);
             let cp = checkpoints.pop().unwrap();
             debug!("get meta table reader");
-            let mut meta_table_reader = dev.get_meta_table_reader()?;
+            let mut meta_table_reader = dev.get_table_reader()?;
             let (obj_table, mut obj_allocater) = meta_table_reader.read_table(&cp)?;
             debug!("Get obj table and obj allocater");
             if let Some((oid, _)) = changes.last() {

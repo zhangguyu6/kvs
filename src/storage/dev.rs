@@ -1,7 +1,7 @@
 use crate::error::TdbError;
 use crate::storage::{
-    DataLogFileReader, DataLogFilwWriter, MetaLogFileReader, MetaLogFileWriter,
-    MetaTableFileReader, MetaTableFileWriter,
+    DataFileReader, DataFilwWriter, MetaLogFileReader, MetaFileWriter,
+    TableFileReader, TableFileWriter,
 };
 use std::fs::{self};
 use std::io::{Seek, SeekFrom};
@@ -39,45 +39,45 @@ impl Dev {
 }
 
 impl Dev {
-    pub fn get_data_log_reader(&self) -> Result<DataLogFileReader, TdbError> {
+    pub fn get_data_reader(&self) -> Result<DataFileReader, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.read(true);
         let file = options_mut.open(&self.data_log_file_path)?;
-        Ok(DataLogFileReader::new(file))
+        Ok(DataFileReader::new(file))
     }
-    pub fn get_data_log_writer(&self, size: usize) -> Result<DataLogFilwWriter, TdbError> {
+    pub fn get_data_writer(&self, size: usize) -> Result<DataFilwWriter, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.write(true).append(true);
         let mut file = options_mut.open(&self.data_log_file_path)?;
         file.seek(SeekFrom::Start(size as u64))?;
-        Ok(DataLogFilwWriter::new(file))
+        Ok(DataFilwWriter::new(file,size))
     }
-    pub fn get_meta_log_reader(&self) -> Result<MetaLogFileReader, TdbError> {
+    pub fn get_meta_reader(&self) -> Result<MetaLogFileReader, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.read(true);
         let mut file = options_mut.open(&self.meta_log_file_path)?;
         file.seek(SeekFrom::Start(0))?;
         Ok(MetaLogFileReader::new(file))
     }
-    pub fn get_meta_log_writer(&self, size: usize) -> Result<MetaLogFileWriter, TdbError> {
+    pub fn get_meta_writer(&self, size: usize) -> Result<MetaFileWriter, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.write(true).append(true);
         let mut file = options_mut.open(&self.meta_log_file_path)?;
         file.seek(SeekFrom::Start(size as u64))?;
-        Ok(MetaLogFileWriter::new(file, size))
+        Ok(MetaFileWriter::new(file, size))
     }
-    pub fn get_meta_table_reader(&self) -> Result<MetaTableFileReader, TdbError> {
+    pub fn get_table_reader(&self) -> Result<TableFileReader, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.read(true);
         let mut file = options_mut.open(&self.meta_table_path)?;
         file.seek(SeekFrom::Start(0))?;
-        Ok(MetaTableFileReader::new(file))
+        Ok(TableFileReader::new(file))
     }
-    pub fn get_meta_table_writer(&self,obj_tablepage_nums:u32) -> Result<MetaTableFileWriter, TdbError> {
+    pub fn get_table_writer(&self) -> Result<TableFileWriter, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.write(true).append(true);
         let file = options_mut.open(&self.meta_table_path)?;
-        Ok(MetaTableFileWriter::new(file,obj_tablepage_nums))
+        Ok(TableFileWriter::new(file))
     }
 }
 

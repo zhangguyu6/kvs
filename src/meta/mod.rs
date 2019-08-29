@@ -6,3 +6,4 @@ pub use check_point::CheckPoint;
 pub use table::{InnerTable, PageId, MAX_PAGE_NUM, OBJ_PRE_PAGE,TablePage,TABLE_PAGE_SIZE};
 pub use immut_table::ImMutTable;
 pub use mut_table::MutTable;
+ 

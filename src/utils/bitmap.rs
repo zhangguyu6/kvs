@@ -79,6 +79,12 @@ pub struct BitMap<B = u32> {
     all_bits: usize,
 }
 
+impl<B:AsBitBlock> Default for BitMap<B> {
+    fn default() -> Self {
+        Self::with_capacity(0)
+    }
+} 
+
 impl<B: AsBitBlock> BitMap<B> {
     pub fn with_capacity(cap: usize) -> Self {
         assert!(cap % B::bits() == 0);

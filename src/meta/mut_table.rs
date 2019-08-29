@@ -1,8 +1,8 @@
 use crate::cache::{ImMutCache, MutCache};
 use crate::error::TdbError;
-use crate::meta::{InnerTable, PageId, MAX_PAGE_NUM, OBJ_PRE_PAGE};
+use crate::meta::{InnerTable, PageId, MAX_PAGE_NUM, OBJ_PRE_PAGE,TablePage};
 use crate::object::{MutObject, Object, ObjectId, ObjectRef,Entry};
-use crate::storage::{DataLogFileReader, ObjectPos};
+use crate::storage::{DataFileReader, ObjectPos};
 use crate::transaction::TimeStamp;
 use crate::utils::BitMap;
 use log::debug;
@@ -12,7 +12,7 @@ use std::collections::{hash_map::IterMut} ;
 
 pub struct MutTable {
     dirty_cache: MutCache,
-    data_reader: DataLogFileReader,
+    data_reader: DataFileReader,
     cache: ImMutCache,
     table: Arc<InnerTable>,
     dirty_pages: HashSet<PageId>,
@@ -21,7 +21,7 @@ pub struct MutTable {
 }
 
 impl MutTable {
-    pub fn new_empty(data_reader: DataLogFileReader) -> Self {
+    pub fn new_empty(data_reader: DataFileReader) -> Self {
         Self::new(
             data_reader,
             InnerTable::default(),
@@ -31,7 +31,7 @@ impl MutTable {
     }
 
     pub fn new(
-        data_reader: DataLogFileReader,
+        data_reader: DataFileReader,
         table: InnerTable,
         bitmap: BitMap,
         dirty_pages: HashSet<PageId>,
@@ -218,7 +218,7 @@ impl MutTable {
     }
 
     /// Free object if no immut context will see it  
-    pub fn gc(&mut self,oids:Vec<ObjectId>,min_ts:TimeStamp) {
+    pub fn gc(&mut self,oids:HashSet<ObjectId>,min_ts:TimeStamp) {
         for oid in oids.iter() {
             self.table.try_gc(*oid,min_ts);
         }
@@ -236,6 +236,31 @@ impl MutTable {
         self.dirty_cache.iter_mut()
     }
 
+    #[inline]
+    pub fn get_inner_table(&self) -> Arc<InnerTable> {
+        self.table.clone()
+    }
+
+    #[inline]
+    pub fn get_immut_cache(&self) -> ImMutCache {
+        self.cache.clone()
+    }
+
+    pub fn get_used_page_num(&self) -> usize {
+        if let Some(oid) = self.bitmap.last_one() {
+            InnerTable::get_page_id(oid as u32) as usize + 1
+        } else {
+            0
+        }
+    }
+
+    pub fn get_dirty_pages(&mut self) -> Vec<PageId> {
+        self.dirty_pages.drain().collect()
+    }
+
+    pub fn get_page(&self,pid:PageId) -> &TablePage {
+        self.table.get_page_ref(pid)
+    }
 
 }
 
