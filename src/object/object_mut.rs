@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 pub enum MutObject {
     Readonly(Arc<Object>),
-    Dirty(Object),
+    Dirty(Object,Arc<Object>),
     New(Object),
-    Del,
+    Del(Arc<Object>),
 }
 
 impl MutObject {
@@ -13,7 +13,7 @@ impl MutObject {
     pub fn get_ref(&self) -> Option<&Object> {
         match self {
             MutObject::Readonly(obj) => Some(&*obj),
-            MutObject::Dirty(obj) => Some(obj),
+            MutObject::Dirty(obj,_) => Some(obj),
             MutObject::New(obj) => Some(obj),
             _ => None,
         }
@@ -21,7 +21,7 @@ impl MutObject {
     #[inline]
     pub fn get_mut(&mut self) -> Option<&mut Object> {
         match self {
-            MutObject::Dirty(obj) => Some(obj),
+            MutObject::Dirty(obj,_) => Some(obj),
             MutObject::New(obj) => Some(obj),
             _ => None,
         }
@@ -30,7 +30,7 @@ impl MutObject {
     pub fn into_arc(self) -> Option<Arc<Object>> {
         match self {
             MutObject::Readonly(obj) => Some(obj.clone()),
-            MutObject::Dirty(obj) => Some(Arc::new(obj)),
+            MutObject::Dirty(obj,_) => Some(Arc::new(obj)),
             MutObject::New(obj) => Some(Arc::new(obj)),
             _ => None,
         }
@@ -38,14 +38,14 @@ impl MutObject {
     #[inline]
     pub fn to_dirty(self) -> Self {
         match self {
-            MutObject::Readonly(obj) => MutObject::Dirty((*obj).clone()),
+            MutObject::Readonly(obj) => MutObject::Dirty((*obj).clone(),obj.clone()),
             _ => panic!("object is not readonly"),
         }
     }
     #[inline]
     pub fn is_dirty(&self) -> bool {
         match self {
-            MutObject::Dirty(_) => true,
+            MutObject::Dirty(_,_) => true,
             _ => false,
         }
     }
@@ -59,7 +59,7 @@ impl MutObject {
     #[inline]
     pub fn is_del(&self) -> bool {
         match self {
-            MutObject::Del => true,
+            MutObject::Del(_) => true,
             _ => false,
         }
     }
