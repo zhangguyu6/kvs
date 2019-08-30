@@ -1,13 +1,13 @@
 use super::ObjectPos;
-use crate::storage::{Deserialize};
+use crate::storage::Deserialize;
 use crate::{
     error::TdbError,
-    object::{Object, ObjectId, ObjectTag, META_DATA_ALIGN,Branch, Entry, Leaf,MutObject},
+    object::{Branch, Entry, Leaf, MutObject, Object, ObjectId, ObjectTag, META_DATA_ALIGN},
 };
 use byteorder::WriteBytesExt;
+use std::collections::hash_map::IterMut;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::collections::hash_map::IterMut;
 
 const DEFAULT_BUF_SIZE: usize = 4096 * 2;
 
@@ -38,35 +38,62 @@ impl DataFileReader {
 
 pub struct DataFilwWriter {
     writer: BufWriter<File>,
-    size:usize,
+    size: u64,
+    removed_size:u64,
 }
 
 impl DataFilwWriter {
-    pub fn new(file: File,size:usize) -> Self {
+    pub fn new(file: File, size: u64,removed_size:u64) -> Self {
         DataFilwWriter {
             writer: BufWriter::with_capacity(DEFAULT_BUF_SIZE, file),
             size,
+            removed_size
         }
     }
     pub fn write_objs(
         &mut self,
-        objs:IterMut<ObjectId,MutObject>
-    ) -> Result<usize, TdbError> {
-        for (oid,mut_obj) in objs {
+        mut objs: IterMut<ObjectId, MutObject>,
+    ) -> Result<(u64,u64), TdbError> {
+        // write branch and entry, align to 4k
+        for (oid, mut_obj) in &mut objs {
             match mut_obj {
-                MutObject::Dirty(obj) | MutObject::New(obj) => {
+                MutObject::Dirty(obj, _) | MutObject::New(obj) => {
+                    if !obj.is::<Entry>() {
                         obj.get_pos_mut().set_pos(self.size as u64);
-                        self.size += obj.write(&mut self.writer)?;
+                        self.size += obj.write(&mut self.writer)? as u64;
+                        assert!(self.size % META_DATA_ALIGN as u64 == 0);
+                    }
                 }
                 _ => {}
             }
         }
-        if self.size % META_DATA_ALIGN != 0 {
-            for _ in self.size & META_DATA_ALIGN .. META_DATA_ALIGN {
+        // write entry, not align
+        for (oid, mut_obj) in &mut objs {
+            match mut_obj {
+                MutObject::Dirty(obj, _) | MutObject::New(obj) => {
+                    if obj.is::<Entry>() {
+                        obj.get_pos_mut().set_pos(self.size as u64);
+                        self.size += obj.write(&mut self.writer)? as u64;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // make commit align to 4K
+        if self.size % META_DATA_ALIGN as u64 != 0 {
+            for _ in self.size & META_DATA_ALIGN as u64..META_DATA_ALIGN as u64 {
                 self.writer.write_u8(0)?;
                 self.size += 1;
             }
         }
-        Ok(self.size)
+        for (oid, mut_obj) in &mut objs {
+            match mut_obj {
+                MutObject::Dirty(_,arc_obj) | MutObject::Del(arc_obj) => {
+                        self.removed_size +=  arc_obj.get_pos().get_len() as u64;
+                }
+                _ => {}
+            }
+        }
+        Ok((self.size,self.removed_size))
     }
 }
