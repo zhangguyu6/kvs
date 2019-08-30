@@ -1,7 +1,7 @@
 use crate::cache::ImMutCache;
 use crate::error::TdbError;
 use crate::meta::InnerTable;
-use crate::object::{Object, Entry, ObjectId};
+use crate::object::{Entry, Object, ObjectId};
 use crate::storage::DataFileReader;
 use crate::transaction::TimeStamp;
 use std::sync::Arc;

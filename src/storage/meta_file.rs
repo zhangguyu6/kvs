@@ -24,7 +24,7 @@ impl MetaFileWriter {
     }
     /// Write checkpoint to meta file
     /// Return true if should apply
-    pub fn write_cp(&mut self, cp:&mut CheckPoint) -> Result<bool, TdbError> {
+    pub fn write_cp(&mut self, cp: &mut CheckPoint) -> Result<bool, TdbError> {
         self.size += cp.len();
         cp.meta_size = self.size as u32;
         cp.serialize(&mut self.writer)?;
@@ -57,7 +57,8 @@ impl MetaFileWriter {
         cp.serialize(&mut self.writer)?;
         self.writer.flush()?;
         fs::rename(&temp_path, &meta_log_file_path)?;
-        self.writer = BufWriter::with_capacity(DEFAULT_BUF_SIZE, options_mut.open(&meta_log_file_path)?);
+        self.writer =
+            BufWriter::with_capacity(DEFAULT_BUF_SIZE, options_mut.open(&meta_log_file_path)?);
         Ok(())
     }
 }

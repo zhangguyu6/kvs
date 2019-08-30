@@ -1,15 +1,15 @@
 use crate::error::TdbError;
 use crate::object::{Object, ObjectId, ObjectRef, Versions};
-use crate::storage::{DataFileReader, ObjectPos, Deserialize, Serialize};
+use crate::storage::{DataFileReader, Deserialize, ObjectPos, Serialize};
 use crate::transaction::TimeStamp;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::io::{Read, Write};
 use std::mem;
 use std::sync::{
     atomic::{AtomicPtr, AtomicU32, Ordering},
     Arc,
 };
-use std::io::{Read, Write};
 use std::u32;
 
 // 4K
@@ -44,7 +44,7 @@ impl Serialize for TablePage {
             writer.write_u64::<LittleEndian>(pos.0)?;
             size += mem::size_of::<u64>();
         }
-        assert_eq!(size,TABLE_PAGE_SIZE);
+        assert_eq!(size, TABLE_PAGE_SIZE);
         Ok(size)
     }
 }
@@ -54,13 +54,12 @@ impl Deserialize for TablePage {
         let mut children = Vec::with_capacity(OBJ_PRE_PAGE);
         for _ in 0..OBJ_PRE_PAGE {
             let pos = ObjectPos(reader.read_u64::<LittleEndian>()?);
-            let versions = Versions::new_only(ObjectRef::on_disk(pos,0)); 
+            let versions = Versions::new_only(ObjectRef::on_disk(pos, 0));
             children.push(RwLock::new(versions));
         }
-        Ok(Self{children})
+        Ok(Self { children })
     }
 }
-
 
 pub struct InnerTable {
     pages: Vec<AtomicPtr<TablePage>>,
@@ -69,13 +68,13 @@ pub struct InnerTable {
 
 impl Default for InnerTable {
     fn default() -> Self {
-        Self::new(0)
+        Self::with_capacity(0)
     }
 }
 
 impl InnerTable {
     /// New will allocate MAX_PAGE_NUM null_ptr, but only initialize page_num TablePage
-    pub fn new(pnum: usize) -> Self {
+    pub fn with_capacity(pnum: usize) -> Self {
         assert!(pnum <= MAX_PAGE_NUM);
         // pre allocated all page
         let mut pages = Vec::with_capacity(MAX_PAGE_NUM);
@@ -95,21 +94,22 @@ impl InnerTable {
     }
 
     #[inline]
-    pub fn append_page(&self,page:TablePage) -> PageId {
+    pub fn append_page(&self, page: TablePage) -> PageId {
         let pid = self.used_page_num.load(Ordering::SeqCst);
-        let old_ptr = self.pages[pid as usize].swap(Box::into_raw(Box::new(page)), Ordering::SeqCst);
+        let old_ptr =
+            self.pages[pid as usize].swap(Box::into_raw(Box::new(page)), Ordering::SeqCst);
         assert!(old_ptr.is_null());
-        self.used_page_num.fetch_add(1,Ordering::SeqCst);
+        self.used_page_num.fetch_add(1, Ordering::SeqCst);
         pid
     }
     /// Return table page ref by pageid
     /// # Panics
     /// Panics if page is not initialized
     #[inline]
-    pub fn get_page_ref(&self,pid:PageId) -> &TablePage {
+    pub fn get_page_ref(&self, pid: PageId) -> &TablePage {
         let page_ptr = self.pages[pid as usize].load(Ordering::SeqCst);
         assert!(!page_ptr.is_null());
-        unsafe { &*page_ptr}
+        unsafe { &*page_ptr }
     }
 
     #[inline]
@@ -251,14 +251,14 @@ impl InnerTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::Dev;
     use crate::object::Entry;
+    use crate::storage::Dev;
     use std::env;
     #[test]
     fn test_table() {
         let dev = Dev::open(env::current_dir().unwrap()).unwrap();
         let mut data_file = dev.get_data_reader().unwrap();
-        let table = InnerTable::new(1);
+        let table = InnerTable::with_capacity(1);
         assert!(table.get(0, 0, &mut data_file).is_err());
         let entry = Entry::default();
         let obj = Object::E(entry);

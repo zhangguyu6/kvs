@@ -1,6 +1,6 @@
 mod immut_context;
 mod mut_context;
-pub use immut_context::{ImMutContext,Iter};
+pub use immut_context::{ImMutContext, Iter};
 pub use mut_context::MutContext;
 
 use std::u64;

@@ -1,7 +1,7 @@
 use crate::error::TdbError;
 use crate::storage::{
-    DataFileReader, DataFilwWriter, MetaLogFileReader, MetaFileWriter,
-    TableFileReader, TableFileWriter,
+    DataFileReader, DataFilwWriter, MetaFileWriter, MetaLogFileReader, TableFileReader,
+    TableFileWriter,
 };
 use std::fs::{self};
 use std::io::{Seek, SeekFrom};
@@ -45,12 +45,16 @@ impl Dev {
         let file = options_mut.open(&self.data_log_file_path)?;
         Ok(DataFileReader::new(file))
     }
-    pub fn get_data_writer(&self, size: usize) -> Result<DataFilwWriter, TdbError> {
+    pub fn get_data_writer(
+        &self,
+        size: u64,
+        removed_size: u64,
+    ) -> Result<DataFilwWriter, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.write(true).append(true);
         let mut file = options_mut.open(&self.data_log_file_path)?;
         file.seek(SeekFrom::Start(size as u64))?;
-        Ok(DataFilwWriter::new(file,size))
+        Ok(DataFilwWriter::new(file, size, removed_size))
     }
     pub fn get_meta_reader(&self) -> Result<MetaLogFileReader, TdbError> {
         let mut options = fs::OpenOptions::new();
@@ -73,11 +77,11 @@ impl Dev {
         file.seek(SeekFrom::Start(0))?;
         Ok(TableFileReader::new(file))
     }
-    pub fn get_table_writer(&self) -> Result<TableFileWriter, TdbError> {
+    pub fn get_table_writer(&self,used_page_num:u32) -> Result<TableFileWriter, TdbError> {
         let mut options = fs::OpenOptions::new();
         let options_mut = options.write(true).append(true);
         let file = options_mut.open(&self.meta_table_path)?;
-        Ok(TableFileWriter::new(file))
+        Ok(TableFileWriter::new(file,used_page_num))
     }
 }
 

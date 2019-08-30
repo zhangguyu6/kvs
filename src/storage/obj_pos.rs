@@ -1,13 +1,13 @@
-use crate::object::{ObjectInfo, ObjectTag};
+use crate::object::ObjectTag;
 use std::fmt;
 use std::io::SeekFrom;
 use std::u64;
+
 // [20~63)
-pub const MAX_DATABASE_SIZE: u64 = (1 << 44) - 1;
+
 // [4~20)
-pub const MAX_OBJECT_SIZE: u64 = (1 << 16) - 1;
+
 // [1~4)
-pub const MAX_OBJECT_TAG_SIZE: u64 = (1 << 4) - 1;
 
 #[derive(Eq, PartialEq, Clone, Copy, Hash)]
 pub struct ObjectPos(pub u64);
@@ -36,19 +36,13 @@ impl ObjectPos {
         Self((pos << 20) + ((len as u64) << 4) + tag as u64)
     }
 
-    pub fn from_info(pos: u64, obj_info: &ObjectInfo) -> Self {
-        let len = obj_info.size as u16;
-        let tag = obj_info.tag;
-        Self::new(pos, len, tag)
-    }
-
     #[inline]
     pub fn get_pos(&self) -> u64 {
         self.0 >> 20
     }
 
     #[inline]
-    pub fn set_pos(&mut self,pos:u64) {
+    pub fn set_pos(&mut self, pos: u64) {
         self.0 = (self.0 & 0xfffff) + (pos << 20);
     }
 
@@ -57,7 +51,7 @@ impl ObjectPos {
         ((self.0 >> 4) & 0xffff) as u16
     }
     #[inline]
-    pub fn set_len(&mut self,size:u16)  {
+    pub fn set_len(&mut self, size: u16) {
         self.0 = (self.0 & ((u64::MAX >> 20 << 20) + 0xf)) + ((size as u64) << 4);
     }
     #[inline]

@@ -1,15 +1,16 @@
-use super::{Key, MAX_KEY_LEN};
+use super::{Key, MAX_KEY_SIZE};
 use crate::error::TdbError;
-use crate::object::{AsObject, Object, ObjectId, ObjectTag};
-use crate::storage::{Deserialize, Serialize,ObjectPos};
+use crate::object::{AsObject, Object, ObjectId, ObjectTag, DATA_ALIGN};
+use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
 use std::mem;
-const MAX_LEAF_SIZE: u16 = 4096;
+
+const MAX_LEAF_SIZE: u16 = DATA_ALIGN as u16;
 // key + key len + nodeid
 const MAX_NONSPLIT_LEAF_SIZE: u16 =
-    MAX_LEAF_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() as u16 - mem::size_of::<u8>() as u16;
+    MAX_LEAF_SIZE - MAX_KEY_SIZE - mem::size_of::<ObjectId>() as u16 - mem::size_of::<u8>() as u16;
 
 const REBALANCE_LEAF_SIZE: u16 = MAX_LEAF_SIZE / 4;
 
@@ -23,7 +24,7 @@ impl Default for Leaf {
     fn default() -> Self {
         Self {
             entrys: Vec::with_capacity(0),
-            pos: ObjectPos::new(0,Self::get_header_size() as u16,ObjectTag::Leaf),
+            pos: ObjectPos::new(0, Self::get_header_size() as u16, ObjectTag::Leaf),
         }
     }
 }
@@ -53,7 +54,8 @@ impl Leaf {
     }
     // Insert object to non-full leaf, leaf must be dirty before insert
     pub fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
-        self.pos.add_len((key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16);
+        self.pos
+            .add_len((key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16);
         self.entrys.insert(index, (key, oid));
     }
 
@@ -64,8 +66,9 @@ impl Leaf {
             .binary_search_by(|_key| _key.0.as_slice().cmp(key.borrow()))
         {
             Ok(index) => {
-                self.pos.sub_len((
-                    key.borrow().len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16);
+                self.pos.sub_len(
+                    (key.borrow().len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16,
+                );
                 Some(self.entrys.remove(index))
             }
             Err(_) => None,
@@ -125,9 +128,11 @@ impl Leaf {
             }
         }
         right_leaf.entrys = self.entrys.split_off(split_index);
-        right_leaf.pos.add_len(self.pos.get_len() + Self::get_header_size() as u16);
+        right_leaf
+            .pos
+            .add_len(self.pos.get_len() + Self::get_header_size() as u16);
         right_leaf.pos.sub_len(left_size as u16);
-        self.pos. set_len(left_size as u16);
+        self.pos.set_len(left_size as u16);
         right_leaf.entrys[0].0.clone()
     }
     #[inline]
@@ -136,7 +141,7 @@ impl Leaf {
     }
     #[inline]
     pub fn should_rebalance_merge(&self) -> bool {
-        self.pos.get_len()  < REBALANCE_LEAF_SIZE
+        self.pos.get_len() < REBALANCE_LEAF_SIZE
     }
     #[inline]
     pub fn should_merge(left_branch: &Leaf, right_branch: &Leaf) -> bool {
@@ -198,10 +203,7 @@ impl Deserialize for Leaf {
             let oid = reader.read_u32::<LittleEndian>()? as ObjectId;
             entrys.push((key, oid));
         }
-        Ok(Leaf {
-            entrys,
-            pos,
-        })
+        Ok(Leaf { entrys, pos })
     }
 }
 

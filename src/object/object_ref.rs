@@ -38,12 +38,10 @@ pub struct Versions {
 }
 
 impl Versions {
-    pub fn new_only(obj_ref:ObjectRef) -> Self {
+    pub fn new_only(obj_ref: ObjectRef) -> Self {
         let mut history = VecDeque::new();
         history.push_back(obj_ref);
-        Self {
-            history
-        }
+        Self { history }
     }
     pub fn find_obj_ref(&self, ts: TimeStamp) -> Option<&ObjectRef> {
         for obj_ref in self.history.iter() {
@@ -64,9 +62,9 @@ impl Versions {
     }
 
     pub fn get_newest_objpos(&self) -> ObjectPos {
-         if let Some(_version) = self.history.front() {
+        if let Some(_version) = self.history.front() {
             if _version.end_ts == MAX_TS {
-               return _version.obj_pos.clone();
+                return _version.obj_pos.clone();
             }
         }
         ObjectPos::default()
@@ -101,7 +99,8 @@ impl Versions {
     }
     #[inline]
     pub fn is_clear(&self) -> bool {
-        self.history.is_empty() || (self.history.len() == 1 && self.history.front().unwrap().end_ts == MAX_TS)
+        self.history.is_empty()
+            || (self.history.len() == 1 && self.history.front().unwrap().end_ts == MAX_TS)
     }
 }
 

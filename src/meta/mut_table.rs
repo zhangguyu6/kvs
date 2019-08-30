@@ -1,7 +1,7 @@
 use crate::cache::{ImMutCache, MutCache};
 use crate::error::TdbError;
 use crate::meta::{InnerTable, PageId, TablePage, MAX_PAGE_NUM, OBJ_PRE_PAGE};
-use crate::object::{Entry, MutObject, Object, ObjectId, ObjectRef};
+use crate::object::{Entry, Object, ObjectId, ObjectRef, ObjectState};
 use crate::storage::{DataFileReader, ObjectPos};
 use crate::transaction::TimeStamp;
 use crate::utils::BitMap;
@@ -63,7 +63,7 @@ impl MutTable {
                 pos.get_tag(),
             );
             self.dirty_cache
-                .insert(oid, MutObject::Readonly(obj.clone()));
+                .insert(oid, ObjectState::Readonly(obj.clone()));
             if !obj.is::<Entry>() {
                 self.cache.insert(pos, obj);
             }
@@ -88,7 +88,7 @@ impl MutTable {
                 pos.get_tag(),
             );
             self.dirty_cache
-                .insert(oid, MutObject::Readonly(obj.clone()));
+                .insert(oid, ObjectState::Readonly(obj.clone()));
             if !obj.is::<Entry>() {
                 self.cache.insert(pos, obj);
             }
@@ -129,7 +129,7 @@ impl MutTable {
     /// Return old object
     /// # Notes
     /// this fn just remove object in dirty cache, not remove it in table
-    pub fn remove(&mut self, oid: ObjectId, ts: TimeStamp) -> Result<MutObject, TdbError> {
+    pub fn remove(&mut self, oid: ObjectId, ts: TimeStamp) -> Result<ObjectState, TdbError> {
         if !self.dirty_cache.contain(oid) {
             let (pos, obj) = self.table.get(oid, ts, &mut self.data_reader)?;
 
@@ -141,7 +141,7 @@ impl MutTable {
                 pos.get_tag(),
             );
             self.dirty_cache
-                .insert(oid, MutObject::Readonly(obj.clone()));
+                .insert(oid, ObjectState::Readonly(obj.clone()));
             if !obj.is::<Entry>() {
                 self.cache.insert(pos, obj);
             }
@@ -149,19 +149,19 @@ impl MutTable {
         if let Some(mut_obj) = self.dirty_cache.remove(oid) {
             match &mut_obj {
                 // object is del, do nothing
-                MutObject::Del(arc_obj) => {
+                ObjectState::Del(arc_obj) => {
                     self.dirty_cache
-                        .insert(oid, MutObject::Del(arc_obj.clone()));
+                        .insert(oid, ObjectState::Del(arc_obj.clone()));
                 }
                 // object is new allcated, just remove it and free oid
-                MutObject::New(_) => {
+                ObjectState::New(_) => {
                     // reuse oid
                     self.free_oid(oid);
                 }
                 // object is on disk, insert remove tag and free oid
-                MutObject::Readonly(arc_obj) | MutObject::Dirty(_, arc_obj) => {
+                ObjectState::Readonly(arc_obj) | ObjectState::Dirty(_, arc_obj) => {
                     self.dirty_cache
-                        .insert(oid, MutObject::Del(arc_obj.clone()));
+                        .insert(oid, ObjectState::Del(arc_obj.clone()));
                     // reuse oid
                     self.free_oid(oid);
                 }
@@ -176,7 +176,7 @@ impl MutTable {
     /// Return allocated oid
     /// # Panics
     /// Panics if there is no unused oid
-    pub fn insert(&mut self, mut obj: Object) -> ObjectId {
+    pub fn insert(&mut self, obj: Object) -> ObjectId {
         let oid = match self.allocate_oid() {
             Some(oid) => oid,
             None => {
@@ -184,7 +184,7 @@ impl MutTable {
                 if used_page_num == MAX_PAGE_NUM {
                     panic!("allocated page overflow");
                 }
-                self.table.extend_to(used_page_num as PageId + 1);
+                self.table.extend_to(used_page_num as PageId);
                 self.bitmap.extend_to((used_page_num + 1) * OBJ_PRE_PAGE);
                 debug!("obj num extend to {:?}", (used_page_num + 1) * OBJ_PRE_PAGE);
                 self.allocate_oid().expect("no enough oid for object")
@@ -193,17 +193,18 @@ impl MutTable {
         if let Some(mut_obj) = self.dirty_cache.remove(oid) {
             match mut_obj {
                 // object is on disk
-                MutObject::Del(arc_obj)
-                | MutObject::Dirty(_, arc_obj)
-                | MutObject::Readonly(arc_obj) => {
-                    self.dirty_cache.insert(oid, MutObject::Dirty(obj, arc_obj));
+                ObjectState::Del(arc_obj)
+                | ObjectState::Dirty(_, arc_obj)
+                | ObjectState::Readonly(arc_obj) => {
+                    self.dirty_cache
+                        .insert(oid, ObjectState::Dirty(obj, arc_obj));
                 }
                 _ => {
-                    self.dirty_cache.insert(oid, MutObject::New(obj));
+                    self.dirty_cache.insert(oid, ObjectState::New(obj));
                 }
             }
         } else {
-            self.dirty_cache.insert(oid, MutObject::New(obj));
+            self.dirty_cache.insert(oid, ObjectState::New(obj));
         }
         oid
     }
@@ -215,14 +216,14 @@ impl MutTable {
         ts: TimeStamp,
         min_ts: TimeStamp,
     ) -> (Vec<ObjectId>, Vec<(ObjectId, ObjectPos)>) {
-        let mut changes = self.dirty_cache.drain();
+        let changes = self.dirty_cache.drain();
         let mut gc_ctx = vec![];
         let mut obj_changes = vec![];
         for (oid, obj) in changes {
             // insert dirty pageid by oid
             self.dirty_pages.insert(InnerTable::get_page_id(oid));
             match obj {
-                MutObject::Dirty(obj, _) | MutObject::New(obj) => {
+                ObjectState::Dirty(obj, _) | ObjectState::New(obj) => {
                     let version = ObjectRef::on_disk(obj.get_pos().clone(), ts);
                     obj_changes.push((oid, obj.get_pos().clone()));
                     match self.table.insert(oid, version, min_ts) {
@@ -230,7 +231,7 @@ impl MutTable {
                         Err(oid) => gc_ctx.push(oid),
                     };
                 }
-                MutObject::Del(_) => {
+                ObjectState::Del(_) => {
                     obj_changes.push((oid, ObjectPos::default()));
                     match self.table.remove(oid, ts, min_ts) {
                         Ok(()) => {}
@@ -244,7 +245,7 @@ impl MutTable {
     }
 
     /// Free object if no immut context will see it  
-    pub fn gc(&mut self, oids: HashSet<ObjectId>, min_ts: TimeStamp) {
+    pub fn gc(&mut self, oids: HashSet<ObjectId>, min_ts: TimeStamp){
         for oid in oids.iter() {
             self.table.try_gc(*oid, min_ts);
         }
@@ -252,7 +253,7 @@ impl MutTable {
 
     /// Return all changed obj in mut iter, DataFileWriter should used this iter and change obj's pos
     #[inline]
-    pub fn obj_iter_mut(&mut self) -> IterMut<ObjectId, MutObject> {
+    pub fn obj_iter_mut(&mut self) -> IterMut<ObjectId, ObjectState> {
         self.dirty_cache.iter_mut()
     }
 
@@ -264,14 +265,6 @@ impl MutTable {
     #[inline]
     pub fn get_immut_cache(&self) -> ImMutCache {
         self.cache.clone()
-    }
-
-    pub fn get_used_page_num(&self) -> usize {
-        if let Some(oid) = self.bitmap.last_one() {
-            InnerTable::get_page_id(oid as u32) as usize + 1
-        } else {
-            0
-        }
     }
 
     pub fn drain_dirty_pages(&mut self) -> Vec<PageId> {

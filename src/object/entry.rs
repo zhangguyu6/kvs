@@ -1,37 +1,36 @@
-use super::{Key, Val, MAX_KEY_LEN};
+use super::{Key, Val, MAX_KEY_SIZE};
 use crate::error::TdbError;
 use crate::object::{AsObject, Object, ObjectTag};
-use crate::storage::{Deserialize, Serialize, MAX_OBJECT_SIZE,ObjectPos};
+use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::convert::TryInto;
 use std::io::{Read, Write};
 use std::mem;
 
-const MAX_ENTRY_SIZE: u16 = MAX_OBJECT_SIZE as u16;
-
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Entry {
     pub key: Key,
     pub val: Val,
-    pub pos: ObjectPos ,
+    pos: ObjectPos,
 }
 
 impl Entry {
     pub fn new(key: Key, val: Val) -> Self {
-        assert!(key.len() <= MAX_KEY_LEN as usize);
-        let size = Self::get_header_size()
-            + key.len()
-            + val.len();
+        assert!(key.len() <= MAX_KEY_SIZE as usize);
+        let size = Self::get_header_size() + key.len() + val.len();
         Self {
             key,
             val,
-            pos:ObjectPos::new(0,size as u16,ObjectTag::Entry),
+            pos: ObjectPos::new(0, size as u16, ObjectTag::Entry),
         }
     }
     pub fn update(&mut self, val: Val) {
         self.pos.sub_len(self.val.len() as u16);
         self.pos.add_len(val.len() as u16);
         self.val = val;
+    }
+    pub fn get_key_val(&self) -> (Key, Val) {
+        (self.key.clone(), self.val.clone())
     }
 }
 
@@ -40,11 +39,10 @@ impl Default for Entry {
         Self {
             key: Vec::with_capacity(0),
             val: Vec::with_capacity(0),
-            pos: ObjectPos::default() ,
+            pos: ObjectPos::default(),
         }
     }
 }
-
 
 impl Serialize for Entry {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<usize, TdbError> {
@@ -54,7 +52,7 @@ impl Serialize for Entry {
         size += mem::size_of::<u64>();
         // key len
         writer.write_u8(self.key.len() as u8)?;
-         size += mem::size_of::<u8>();
+        size += mem::size_of::<u8>();
         // key
         writer.write(&self.key)?;
         size += self.key.len();
@@ -82,11 +80,7 @@ impl Deserialize for Entry {
         // val
         let mut val = vec![0; val_len];
         reader.read_exact(&mut val)?;
-        Ok(Entry {
-            key,
-            val,
-            pos,
-        })
+        Ok(Entry { key, val, pos })
     }
 }
 

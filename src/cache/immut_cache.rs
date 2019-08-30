@@ -1,4 +1,4 @@
-use crate::object::{Object,Entry};
+use crate::object::{Entry, Object};
 use crate::storage::ObjectPos;
 use crossbeam::{
     channel::{unbounded, Receiver, Sender, TryRecvError},
@@ -13,8 +13,6 @@ const DEFAULT_CACHE_SIZE: usize = 4096;
 
 enum ObjectOp {
     Insert(ObjectPos, Arc<Object>),
-    Remove(ObjectPos),
-    Clear,
     Close,
 }
 
@@ -63,12 +61,6 @@ impl ImMutCacheInner {
                         ObjectOp::Insert(obj_pos, arc_node) => {
                             self.lru_cache.insert(obj_pos, arc_node);
                         }
-                        ObjectOp::Remove(obj_pos) => {
-                            self.lru_cache.remove(&obj_pos);
-                        }
-                        ObjectOp::Clear => {
-                            self.lru_cache.clear();
-                        }
                         ObjectOp::Close => {
                             break;
                         }
@@ -95,14 +87,6 @@ impl ImMutCache {
                 .try_send(ObjectOp::Insert(obj_pos, arc_obj))
                 .expect("send error");
         }
-    }
-    pub fn remove(&self, obj_pos: ObjectPos) {
-        self.sender
-            .try_send(ObjectOp::Remove(obj_pos))
-            .expect("send error");
-    }
-    pub fn clear(&self) {
-        self.sender.try_send(ObjectOp::Clear).expect("send error");
     }
     pub fn close(&self) {
         self.sender.try_send(ObjectOp::Close).expect("send error");

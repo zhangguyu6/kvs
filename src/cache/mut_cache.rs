@@ -1,11 +1,8 @@
-use crate::object::{MutObject, Object, ObjectId};
-use std::collections::{
-    hash_map::{Iter, IterMut},
-    HashMap,
-};
+use crate::object::{Object, ObjectId, ObjectState};
+use std::collections::{hash_map::IterMut, HashMap};
 
 pub struct MutCache {
-    dirties: HashMap<ObjectId, MutObject>,
+    dirties: HashMap<ObjectId, ObjectState>,
 }
 
 impl Default for MutCache {
@@ -24,11 +21,10 @@ impl MutCache {
     pub fn contain(&mut self, oid: ObjectId) -> bool {
         self.dirties.contains_key(&oid)
     }
-    pub fn remove(&mut self, oid: ObjectId) -> Option<MutObject> {
+    pub fn remove(&mut self, oid: ObjectId) -> Option<ObjectState> {
         self.dirties.remove(&oid)
-       
     }
-    pub fn insert(&mut self, oid: ObjectId, obj_mut: MutObject) -> Option<MutObject> {
+    pub fn insert(&mut self, oid: ObjectId, obj_mut: ObjectState) -> Option<ObjectState> {
         self.dirties.insert(oid, obj_mut)
     }
     pub fn get_mut(&mut self, oid: ObjectId) -> Option<&mut Object> {
@@ -45,15 +41,10 @@ impl MutCache {
     pub fn get_ref(&self, oid: ObjectId) -> Option<&Object> {
         self.dirties.get(&oid)?.get_ref()
     }
-    pub fn drain(&mut self) -> Vec<(ObjectId, MutObject)> {
+    pub fn drain(&mut self) -> Vec<(ObjectId, ObjectState)> {
         self.dirties.drain().collect()
     }
-    pub fn iter_mut(&mut self) -> IterMut<ObjectId, MutObject> {
+    pub fn iter_mut(&mut self) -> IterMut<ObjectId, ObjectState> {
         self.dirties.iter_mut()
     }
-
-    pub fn iter(&mut self) -> Iter<ObjectId, MutObject> {
-        self.dirties.iter()
-    }
-
 }

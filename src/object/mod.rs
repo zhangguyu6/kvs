@@ -1,26 +1,26 @@
-mod object_mut;
-mod object_ref;
 mod branch;
 mod entry;
 mod leaf;
+mod object_ref;
+mod object_state;
 
 use crate::error::TdbError;
-use crate::storage::{Deserialize, Serialize ,ObjectPos};
-pub use object_mut::MutObject;
-pub use object_ref::{ObjectRef, Versions};
+use crate::storage::{Deserialize, ObjectPos, Serialize};
 pub use branch::Branch;
 pub use entry::Entry;
 pub use leaf::Leaf;
+pub use object_ref::{ObjectRef, Versions};
+pub use object_state::ObjectState;
 use std::io::{Read, Write};
-use std::mem;
+use std::u16;
 use std::u32;
 use std::u8;
-use std::u16;
+
 // 255 byte
-pub const MAX_KEY_LEN: u16 = u8::MAX as u16 ;
-pub const OBJECT_MAX_SIZE: u16 = u16::MAX ;
+pub const MAX_KEY_SIZE: u16 = u8::MAX as u16;
+pub const MAX_OBJ_SIZE: u16 = u16::MAX;
 pub const UNUSED_OID: u32 = u32::MAX;
-pub const META_DATA_ALIGN:usize = 4096;
+pub const DATA_ALIGN: usize = 4096;
 
 pub type Key = Vec<u8>;
 
@@ -123,44 +123,11 @@ impl Into<u8> for ObjectTag {
     }
 }
 
-// Embed in ob-disk object struct
-#[derive(Eq, PartialEq, Clone, Debug)]
-pub struct ObjectInfo {
-    pub oid: ObjectId,
-    pub tag: ObjectTag,
-    pub size: usize,
-}
-
-impl ObjectInfo {
-    pub fn static_size() -> usize {
-        mem::size_of::<u64>()
-    }
-}
-
-impl From<u64> for ObjectInfo {
-    fn from(val: u64) -> Self {
-        // low [0~32) bit
-        let oid = (val & 0xFFFFFFFF) as u32;
-        // [32,40) bit
-        let tag = ObjectTag::from(((val & 0xFF00000000) >> 32) as u8);
-        // [40,64) bit
-        let size = ((val & 0xFFFFFF0000000000) >> 40) as usize;
-        Self { oid, tag, size }
-    }
-}
-
-impl Into<u64> for ObjectInfo {
-    fn into(self) -> u64 {
-        assert!(self.size <= OBJECT_MAX_SIZE as usize);
-        self.oid as u64 + ((self.tag as u8 as u64) << 32) + ((self.size as u64) << 40)
-    }
-}
-
 pub trait AsObject: Deserialize + Serialize {
     fn get_tag(&self) -> ObjectTag;
     fn get_key(&self) -> &[u8];
     fn get_ref(obejct_ref: &Object) -> &Self;
-    fn get_mut(object_mut: &mut Object) -> &mut Self;
+    fn get_mut(object_state: &mut Object) -> &mut Self;
     fn is(obejct_ref: &Object) -> bool;
     fn get_pos(&self) -> &ObjectPos;
     fn get_pos_mut(&mut self) -> &mut ObjectPos;
@@ -179,48 +146,5 @@ mod tests {
         assert_eq!(ObjectTag::Leaf, ObjectTag::from(0));
         assert_eq!(ObjectTag::Branch, ObjectTag::from(1));
         assert_eq!(ObjectTag::Entry, ObjectTag::from(2));
-    }
-
-    #[test]
-    fn test_obejct_info() {
-        let obj_info = ObjectInfo {
-            oid: 1,
-            tag: ObjectTag::Leaf,
-            size: 1,
-        };
-        let val: u64 = obj_info.clone().into();
-        assert_eq!(obj_info, ObjectInfo::from(val));
-
-        let obj_info = ObjectInfo {
-            oid: 2,
-            tag: ObjectTag::Branch,
-            size: 4096,
-        };
-        let val: u64 = obj_info.clone().into();
-        assert_eq!(obj_info, ObjectInfo::from(val));
-
-        let obj_info = ObjectInfo {
-            oid: 3,
-            tag: ObjectTag::Leaf,
-            size: 4096,
-        };
-        let val: u64 = obj_info.clone().into();
-        assert_eq!(obj_info, ObjectInfo::from(val));
-
-        let obj_info = ObjectInfo {
-            oid: 4,
-            tag: ObjectTag::Entry,
-            size: 40960,
-        };
-        let val: u64 = obj_info.clone().into();
-        assert_eq!(obj_info, ObjectInfo::from(val));
-
-        let obj_info = ObjectInfo {
-            oid: 4,
-            tag: ObjectTag::Entry,
-            size: OBJECT_MAX_SIZE as usize,
-        };
-        let val: u64 = obj_info.clone().into();
-        assert_eq!(obj_info, ObjectInfo::from(val));
     }
 }

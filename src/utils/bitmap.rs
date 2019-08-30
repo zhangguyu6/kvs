@@ -79,11 +79,11 @@ pub struct BitMap<B = u32> {
     all_bits: usize,
 }
 
-impl<B:AsBitBlock> Default for BitMap<B> {
+impl<B: AsBitBlock> Default for BitMap<B> {
     fn default() -> Self {
         Self::with_capacity(0)
     }
-} 
+}
 
 impl<B: AsBitBlock> BitMap<B> {
     pub fn with_capacity(cap: usize) -> Self {
@@ -100,7 +100,7 @@ impl<B: AsBitBlock> BitMap<B> {
     pub fn extend_to(&mut self, new_len: usize) -> usize {
         assert!(new_len >= self.all_bits && new_len % B::bits() == 0);
         self.bit_blocks.resize(new_len, B::all_zero());
-        self.all_bits += new_len;
+        self.all_bits = new_len;
         self.all_bits
     }
 

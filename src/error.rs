@@ -5,11 +5,10 @@ use std::io;
 #[derive(Debug)]
 pub enum TdbError {
     IoError(io::Error),
-    ExceedMaxCap,
     SerializeError,
     DeserializeError,
-    Restart,
     NoSpace,
+    ObjectTooBig,
     NotFindObject,
 }
 
@@ -17,10 +16,9 @@ impl PartialEq for TdbError {
     fn eq(&self, other: &TdbError) -> bool {
         use TdbError::*;
         match (self, other) {
-            (ExceedMaxCap, ExceedMaxCap) => true,
+            (ObjectTooBig, ObjectTooBig) => true,
             (SerializeError, SerializeError) => true,
             (DeserializeError, DeserializeError) => true,
-            (Restart, Restart) => true,
             (NoSpace, NoSpace) => true,
             (NotFindObject, NotFindObject) => true,
             (IoError(e1), IoError(e2)) => e1.kind() == e2.kind(),

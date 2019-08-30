@@ -1,16 +1,18 @@
-use super::{Key, MAX_KEY_LEN};
+use super::{Key, MAX_KEY_SIZE};
 use crate::error::TdbError;
-use crate::object::{AsObject, Object, ObjectId,  ObjectTag};
-use crate::storage::{Deserialize, Serialize,ObjectPos};
+use crate::object::{AsObject, Object, ObjectId, ObjectTag, DATA_ALIGN};
+use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Borrow;
 use std::io::{Read, Write};
 use std::mem;
 
-const MAX_BRANCH_SIZE: u16 = 4096;
+const MAX_BRANCH_SIZE: u16 = DATA_ALIGN as u16;
 // key + key len + nodeid
-const MAX_NONSPLIT_BRANCH_SIZE: u16 =
-    MAX_BRANCH_SIZE - MAX_KEY_LEN - mem::size_of::<ObjectId>() as u16 - mem::size_of::<u8>() as u16;
+const MAX_NONSPLIT_BRANCH_SIZE: u16 = MAX_BRANCH_SIZE
+    - MAX_KEY_SIZE
+    - mem::size_of::<ObjectId>() as u16
+    - mem::size_of::<u8>() as u16;
 
 const REBALANCE_BRANCH_SIZE: u16 = MAX_BRANCH_SIZE / 4;
 
@@ -26,13 +28,13 @@ impl Default for Branch {
         Self {
             keys: Vec::with_capacity(0),
             children: Vec::with_capacity(0),
-            pos:ObjectPos::new(0,Branch::get_header_size() as u16 ,ObjectTag::Branch),
+            pos: ObjectPos::new(0, Branch::get_header_size() as u16, ObjectTag::Branch),
         }
     }
 }
 impl Branch {
     pub fn new(key: Key, oid0: ObjectId, oid1: ObjectId) -> Self {
-        assert!(key.len() <= MAX_KEY_LEN as usize);
+        assert!(key.len() <= MAX_KEY_SIZE as usize);
         let size = Branch::get_header_size()
             + key.len()
             + mem::size_of::<u8>()
@@ -40,7 +42,7 @@ impl Branch {
         Self {
             keys: vec![key],
             children: vec![oid0, oid1],
-            pos:ObjectPos::new(0,size as  u16 ,ObjectTag::Branch),
+            pos: ObjectPos::new(0, size as u16, ObjectTag::Branch),
         }
     }
     // Return (object,object index) greater or equal to key
@@ -58,7 +60,8 @@ impl Branch {
     pub fn remove_index(&mut self, index: usize) -> (Key, ObjectId) {
         let key = self.keys.remove(index);
         let oid = self.children.remove(index + 1);
-        self.pos.sub_len((key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16) ;
+        self.pos
+            .sub_len((key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16);
         (key, oid)
     }
     pub fn update_key(&mut self, index: usize, key: Key) {
@@ -68,10 +71,11 @@ impl Branch {
     }
     // Insert object to non-full branch, branch must be dirty before insert
     pub fn insert_non_full(&mut self, index: usize, key: Key, oid: ObjectId) {
-        assert!(key.len() <= MAX_KEY_LEN as usize);
+        assert!(key.len() <= MAX_KEY_SIZE as usize);
         // don't use this function for root insert
         assert!(!self.children.is_empty());
-        self.pos.add_len((key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16);
+        self.pos
+            .add_len((key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>()) as u16);
         self.keys.insert(index, key);
         self.children.insert(index + 1, oid);
     }
@@ -106,7 +110,8 @@ impl Branch {
     // right_branch should be marked del after merge
     // merge_key is the key of right_branch's first child
     pub fn merge(&mut self, right_branch: &mut Branch, merge_key: Key) {
-        self.pos.add_len((merge_key.len() + mem::size_of::<u8>()) as u16) ;
+        self.pos
+            .add_len((merge_key.len() + mem::size_of::<u8>()) as u16);
         self.keys.push(merge_key);
         self.keys.append(&mut right_branch.keys);
         self.children.append(&mut right_branch.children);
@@ -118,7 +123,8 @@ impl Branch {
     // rebalance_key is the key of right_branch's first child
     // return remove key as new key in parrent branch
     pub fn rebalance(&mut self, right_branch: &mut Branch, rebalance_key: Key) -> Key {
-        self.pos.add_len((rebalance_key.len() + mem::size_of::<u8>()) as u16);
+        self.pos
+            .add_len((rebalance_key.len() + mem::size_of::<u8>()) as u16);
         self.keys.push(rebalance_key);
         self.keys.append(&mut right_branch.keys);
         self.children.append(&mut right_branch.children);
@@ -135,9 +141,12 @@ impl Branch {
         }
         right_branch.keys = self.keys.split_off(split_index + 1);
         right_branch.children = self.children.split_off(split_index + 1);
-        right_branch.pos.set_len(self.pos.get_len() - left_size as u16 + Self::get_header_size() as u16);
+        right_branch
+            .pos
+            .set_len(self.pos.get_len() - left_size as u16 + Self::get_header_size() as u16);
         let remove_key = self.keys.pop().unwrap();
-        self.pos.set_len((left_size - remove_key.len() - mem::size_of::<u8>()) as u16);
+        self.pos
+            .set_len((left_size - remove_key.len() - mem::size_of::<u8>()) as u16);
         remove_key
     }
     #[inline]
@@ -163,7 +172,6 @@ impl Branch {
         &self.keys[0]
     }
 }
-
 
 impl Serialize for Branch {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<usize, TdbError> {
@@ -276,7 +284,7 @@ impl AsObject for Branch {
     #[inline]
     fn get_header_size() -> usize {
         // object_pos + key num + child num
-       mem::size_of::<u64>() + mem::size_of::<u8>() + mem::size_of::<u8>()
+        mem::size_of::<u64>() + mem::size_of::<u8>() + mem::size_of::<u8>()
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::error::TdbError;
-use crate::meta::{PageId, OBJ_PRE_PAGE};
+use crate::meta::{PageId,InnerTable};
 use crate::object::{ObjectId, UNUSED_OID};
 use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -15,7 +15,7 @@ pub struct CheckPoint {
     // crc fast
     pub crc: u32,
     // for gc
-    pub data_remove_size: u64,
+    pub data_removed_size: u64,
     pub data_size: u64,
     pub root_oid: ObjectId,
     // meta log area used size
@@ -27,7 +27,7 @@ pub struct CheckPoint {
 
 impl CheckPoint {
     pub fn new(
-        data_remove_size: u64,
+        data_removed_size: u64,
         data_size: u64,
         root_oid: ObjectId,
         meta_size: u32,
@@ -40,7 +40,7 @@ impl CheckPoint {
             // crc fast
             crc: u32::MAX,
             // for gc
-            data_remove_size,
+            data_removed_size,
             data_size,
             root_oid,
             meta_size,
@@ -53,9 +53,10 @@ impl CheckPoint {
         cp
     }
 
-    pub fn merge(cps: &Vec<CheckPoint>) -> (Vec<(ObjectId, ObjectPos)>, HashSet<PageId>) {
+    pub fn merge(mut cps: Vec<CheckPoint>) -> CheckPoint {
+        assert!(cps.len() > 0);
         let mut changes: HashMap<ObjectId, ObjectPos> = HashMap::default();
-        let mut dirty_pages = HashSet::default();
+
         for cp in cps.iter() {
             for (oid, obj_pos) in cp.obj_changes.iter() {
                 changes.insert(*oid, *obj_pos);
@@ -63,10 +64,17 @@ impl CheckPoint {
         }
         let mut changes: Vec<(ObjectId, ObjectPos)> = changes.drain().collect();
         changes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        for (oid, _) in changes.iter() {
-            dirty_pages.insert(oid / OBJ_PRE_PAGE as u32);
+        let mut last_cp = cps.pop().unwrap();
+        last_cp.obj_changes = changes;
+        last_cp
+    }
+
+    pub fn get_dirty_pages(&self) -> HashSet<PageId> {
+        let mut dirty_pages = HashSet::default();
+                for (oid, _) in self.obj_changes.iter() {
+            dirty_pages.insert(InnerTable::get_page_id(*oid));
         }
-        (changes, dirty_pages)
+        dirty_pages
     }
 
     #[inline]
@@ -75,7 +83,7 @@ impl CheckPoint {
         mem::size_of::<u32>()
         // crc 32
         + mem::size_of::<u32>()
-        // data_remove_size
+        // data_removed_size
             + mem::size_of::<u64>()
             // datasizen
             + mem::size_of::<u64>()
@@ -100,7 +108,7 @@ impl Default for CheckPoint {
             // crc fast
             crc: u32::MAX,
             // for gc
-            data_remove_size: 0,
+            data_removed_size: 0,
             data_size: 0,
             root_oid: UNUSED_OID,
             // meta log area used size
@@ -116,12 +124,11 @@ impl Default for CheckPoint {
     }
 }
 
-
 impl Serialize for CheckPoint {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<usize, TdbError> {
         writer.write_u32::<LittleEndian>(self.size)?;
         writer.write_u32::<LittleEndian>(self.crc)?;
-        writer.write_u64::<LittleEndian>(self.data_remove_size)?;
+        writer.write_u64::<LittleEndian>(self.data_removed_size)?;
         writer.write_u64::<LittleEndian>(self.data_size)?;
         writer.write_u32::<LittleEndian>(self.root_oid)?;
         writer.write_u32::<LittleEndian>(self.meta_size)?;
@@ -145,7 +152,7 @@ impl Deserialize for CheckPoint {
         if crc != u32::MAX {
             return Err(TdbError::SerializeError);
         }
-        let data_remove_size = reader.read_u64::<LittleEndian>()?;
+        let data_removed_size = reader.read_u64::<LittleEndian>()?;
         let data_size = reader.read_u64::<LittleEndian>()?;
         let root_oid = reader.read_u32::<LittleEndian>()?;
         let meta_size = reader.read_u32::<LittleEndian>()?;
@@ -160,7 +167,7 @@ impl Deserialize for CheckPoint {
         Ok(Self {
             size,
             crc,
-            data_remove_size,
+            data_removed_size,
             data_size,
             root_oid,
             meta_size,
