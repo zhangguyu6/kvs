@@ -11,6 +11,7 @@ use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct Context {
     pub ts: TimeStamp,
     pub root_oid: ObjectId,
@@ -62,7 +63,7 @@ impl<'a> KVWriter<'a> {
         Ok(self.0.get_entry(key)?.map(|entry| entry.val.clone()))
     }
 
-    pub fn commit(&mut self) -> Result<(), TdbError> {
+    pub fn commit(mut self) -> Result<(), TdbError> {
         let arc_ctx = self.0.commit()?;
         *self.1.write() = arc_ctx;
         Ok(())
@@ -113,7 +114,7 @@ impl KVStore {
                 mut_ctx: Mutex::new(mut_ctx),
             })
         } else {
-            debug!("open prev database");
+            debug!("find prev checkpoint, open prev database");
             let cp = CheckPoint::merge(checkpoints);
             let (mut_ctx, table, immut_cache) = MutContext::new(dev.clone(), cp)?;
             Ok(Self {
@@ -127,31 +128,66 @@ impl KVStore {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use env_logger;
-//     use std::env;
-//     fn init() {
-//         let _ = env_logger::builder().is_test(true).try_init();
-//     }
-//     // #[test]
-//     // fn test_dev() {
-//     //     assert!(Dev::open(env::current_dir().unwrap()).is_ok());
-//     // }
-//     #[test]
-//     fn test_write() {
-//         init();
-//         let database = DataBase::open(env::current_dir().unwrap()).unwrap();
-//         let mut writer = database.get_writer();
-//         // assert!(writer.insert(vec![1, 2, 5], vec![1, 2, 5]).is_ok());
-//         // assert_eq!(writer.insert(vec![1, 2, 4], vec![1, 2, 4]),Ok(()));
-//         // assert!(writer.insert(vec![1, 2, 3], vec![1, 2, 3]).is_ok());
-//         // assert!(writer.insert(vec![1, 2, 6], vec![1, 2, 3]).is_ok());
-//         assert_eq!(writer.get(&vec![1, 2, 3]), Ok(Some(vec![1, 2, 3])));
-//         assert_eq!(writer.get(&vec![1, 2, 4]), Ok(Some(vec![1, 2, 4])));
-//         // assert_eq!(writer.get(&vec![1, 2, 5]), Ok(Some(vec![1, 2, 5])));
-//         // assert_eq!(writer.commit(), Ok(()));
-//     }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+    #[test]
+    fn test_kv_base() {
+        init();
+        let dir = tempdir().unwrap();
+        let kv = KVStore::open(dir.path()).unwrap();
 
-// }
+        let mut writer = kv.get_writer();
+        assert_eq!(writer.insert(vec![1, 2, 3], vec![3, 2, 1]), Ok(()));
+        assert_eq!(writer.get(&vec![1, 2, 3]), Ok(Some(vec![3, 2, 1])));
+        assert_eq!(writer.commit(), Ok(()));
+
+        let mut reader = kv.get_reader().unwrap();
+        assert_eq!(reader.get(&vec![1, 2, 3]), Ok(Some(vec![3, 2, 1])));
+    }
+
+    #[test]
+    fn test_kv_many() {
+        init();
+        let dir = tempdir().unwrap();
+        let kv = KVStore::open(dir.path()).unwrap();
+
+        let mut writer = kv.get_writer();
+        for i in 0..=255 {
+            assert_eq!(writer.insert(vec![i, 1, 1], vec![i, 1, 1]), Ok(()));
+        }
+        for i in 0..=255 {
+            assert_eq!(writer.insert(vec![i, 2, 2], vec![i, 2, 2]), Ok(()));
+        }
+        assert_eq!(writer.commit(), Ok(()));
+
+        let mut reader = kv.get_reader().unwrap();
+        for i in 0..=255 {
+            assert_eq!(reader.get(&vec![i, 1, 1]), Ok(Some(vec![i, 1, 1])));
+        }
+        for i in 0..=255 {
+            assert_eq!(reader.get(&vec![i, 2, 2]), Ok(Some(vec![i, 2, 2])));
+        }
+        assert_eq!(reader.get_min(), Ok(Some((vec![0, 1, 1], vec![0, 1, 1]))));
+        assert_eq!(
+            reader.get_max(),
+            Ok(Some((vec![255, 2, 2], vec![255, 2, 2])))
+        );
+
+        let mut writer = kv.get_writer();
+        assert_eq!(
+            writer.remove(&vec![255, 2, 2]),
+            Ok(Some((vec![255, 2, 2], vec![255, 2, 2])))
+        );
+        assert_eq!(writer.get(&vec![255, 2, 2]), Ok(None));
+        assert_eq!(writer.commit(), Ok(()));
+        let mut reader1 = kv.get_reader().unwrap();
+        assert_eq!(reader.get(&vec![255, 2, 2]), Ok(Some(vec![255, 2, 2])));
+        assert_eq!(reader1.get(&vec![255, 2, 2]), Ok(None));
+    }
+
+}

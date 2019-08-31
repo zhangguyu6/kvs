@@ -97,10 +97,10 @@ impl<B: AsBitBlock> BitMap<B> {
             all_bits: cap,
         }
     }
-    pub fn extend_to(&mut self, new_len: usize) -> usize {
-        assert!(new_len >= self.all_bits && new_len % B::bits() == 0);
-        self.bit_blocks.resize(new_len, B::all_zero());
-        self.all_bits = new_len;
+    pub fn extend_to(&mut self, bits: usize) -> usize {
+        assert!(bits >= self.all_bits && bits % B::bits() == 0);
+        self.bit_blocks.resize(bits / B::bits(), B::all_zero());
+        self.all_bits = bits;
         self.all_bits
     }
 
@@ -357,7 +357,7 @@ mod tests {
             assert_eq!(bitmap.first_zero_with_hint_set(0), Some(i));
         }
         assert_eq!(bitmap.count_zeros(), 0);
-        bitmap.extend_to(32);
+        bitmap.extend_to(64);
         assert_eq!(bitmap.first_zero_with_hint_set(31), Some(32));
     }
 

@@ -4,15 +4,13 @@ version = "0.1.0"
 authors = ["zhangguyu <zhangguyu6@gmail.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 parking_lot = "0.9"
 lru-cache = "0.1.2"
 crossbeam = "0.7"
 byteorder = "1"
 log = "0.4.0"
-bit-vec = "0.6.1"
 
 [dev-dependencies]
 env_logger = "0.6.2"
+tempfile = "3.1.0"

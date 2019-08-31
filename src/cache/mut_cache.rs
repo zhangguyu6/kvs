@@ -1,6 +1,7 @@
 use crate::object::{Object, ObjectId, ObjectState};
-use std::collections::{hash_map::IterMut, HashMap};
+use std::collections::HashMap;
 
+/// Dirty Object cache for MutTable
 pub struct MutCache {
     dirties: HashMap<ObjectId, ObjectState>,
 }
@@ -13,9 +14,6 @@ impl Default for MutCache {
     }
 }
 
-/// Readonly in cache
-/// New/Del/Dirty in dirties
-/// There is no intersection between the dirties and cache
 impl MutCache {
     ///  Return true if oid in dirties
     pub fn contain(&mut self, oid: ObjectId) -> bool {
@@ -41,10 +39,12 @@ impl MutCache {
     pub fn get_ref(&self, oid: ObjectId) -> Option<&Object> {
         self.dirties.get(&oid)?.get_ref()
     }
+    /// Clear cache and return objects
     pub fn drain(&mut self) -> Vec<(ObjectId, ObjectState)> {
         self.dirties.drain().collect()
     }
-    pub fn iter_mut(&mut self) -> IterMut<ObjectId, ObjectState> {
-        self.dirties.iter_mut()
+
+    pub fn get_inner_mut(&mut self) -> &mut HashMap<ObjectId, ObjectState> {
+        &mut self.dirties
     }
 }

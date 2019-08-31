@@ -1,8 +1,8 @@
 use super::TimeStamp;
 use crate::cache::ImMutCache;
 use crate::error::TdbError;
-use crate::meta::{ImMutTable,InnerTable};
-use crate::object::{Branch, Entry, Leaf, Object, ObjectId, UNUSED_OID,Key,Val};
+use crate::meta::{ImMutTable, InnerTable};
+use crate::object::{Branch, Entry, Key, Leaf, Object, ObjectId, Val, UNUSED_OID};
 use crate::storage::DataFileReader;
 use std::borrow::Borrow;
 use std::ops::Range;
@@ -15,10 +15,16 @@ pub struct ImMutContext {
 }
 
 impl ImMutContext {
-    pub fn new(root_oid: ObjectId, ts: TimeStamp, table: Arc<InnerTable>, data_reader: DataFileReader, cache: ImMutCache) -> Self {
+    pub fn new(
+        root_oid: ObjectId,
+        ts: TimeStamp,
+        table: Arc<InnerTable>,
+        data_reader: DataFileReader,
+        cache: ImMutCache,
+    ) -> Self {
         Self {
             root_oid,
-            table:ImMutTable::new(table, data_reader, cache),
+            table: ImMutTable::new(table, data_reader, cache),
             ts,
         }
     }
@@ -133,7 +139,7 @@ impl ImMutContext {
         }
     }
 
-    pub fn get_min(&mut self) -> Result<Option<(Key,Val)>, TdbError> {
+    pub fn get_min(&mut self) -> Result<Option<(Key, Val)>, TdbError> {
         if self.root_oid == UNUSED_OID {
             return Ok(None);
         }
@@ -214,119 +220,80 @@ impl ImMutContext {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::cache::BackgroundCacheInner;
-//     use crate::object::*;
-//     use crate::storage::{Dummy, ObjectPos};
-//     use crate::tree::Entry;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::ImMutCache;
+    use crate::object::{Entry, ObjectRef};
+    use crate::storage::{Dev, ObjectPos};
+    use std::env;
+    use std::sync::Arc;
+    #[test]
+    fn test_immut_ctx() {
+        let dev = Dev::open(env::current_dir().unwrap()).unwrap();
+        let data_reader = dev.get_data_reader().unwrap();
+        let cache = ImMutCache::default();
+        let table = InnerTable::with_capacity(1);
 
-//     #[test]
-//     fn test_object_access() {
-//         let dummy = Dummy {};
-//         let dev = BlockDev::new(dummy);
-//         let obj_table = ObjectTable::with_capacity(1 << 16);
-//         let cache = BackgroundCacheInner::new(32);
-//         let table = ObjectAccess {
-//             ts: 0,
-//             cache: &cache,
-//             dev: &dev,
-//             obj_table: &obj_table,
-//         };
-//         assert_eq!(table.get(0), None);
-//         let arc_entry = Arc::new(Object::E(Entry::new(vec![1], vec![1], 1)));
-//         let pos = ObjectPos::default();
-//         let obj_ref = ObjectRef::new(&arc_entry, pos, 0);
-//         obj_table.insert(1, obj_ref, 0);
-//         assert_eq!(table.get(1).unwrap(), arc_entry);
-//         cache.close();
-//     }
-// }
+        let e1 = Arc::new(Object::E(Entry::new(vec![1], vec![1])));
+        let obj1 = ObjectRef::new(&e1, ObjectPos::default(), 0);
+        let _ = table.insert(1, obj1, 0);
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::cache::BackgroundCacheInner;
-//     use crate::object::*;
-//     use crate::storage::{BlockDev, Dummy, ObjectPos};
-//     use crate::tree::Entry;
-//     use crate::meta::ObjectTable;
-//     #[test]
-//     fn test_tree_reader() {
-//         let dummy = Dummy {};
-//         let dev = BlockDev::new(dummy);
-//         let obj_table = ObjectTable::with_capacity(1 << 16);
-//         let cache = BackgroundCacheInner::new(32);
-//         let table = ObjectAccess {
-//             ts: 0,
-//             cache: &cache,
-//             dev: &dev,
-//             obj_table: &obj_table,
-//         };
-//         let e1 = Arc::new(Object::E(Entry::new(vec![1], vec![1], 1)));
-//         let obj1 = ObjectRef::new(&e1, ObjectPos::default(), 0);
-//         obj_table.insert(1, obj1, 0);
+        let e2 = Arc::new(Object::E(Entry::new(vec![2], vec![2])));
+        let obj2 = ObjectRef::new(&e2, ObjectPos::default(), 0);
+        let _ = table.insert(2, obj2, 0);
 
-//         let e2 = Arc::new(Object::E(Entry::new(vec![2], vec![2], 2)));
-//         let obj2 = ObjectRef::new(&e2, ObjectPos::default(), 0);
-//         obj_table.insert(2, obj2, 0);
+        let e3 = Arc::new(Object::E(Entry::new(vec![3], vec![3])));
+        let obj3 = ObjectRef::new(&e3, ObjectPos::default(), 0);
+        let _ = table.insert(3, obj3, 0);
 
-//         let e3 = Arc::new(Object::E(Entry::new(vec![3], vec![3], 3)));
-//         let obj3 = ObjectRef::new(&e3, ObjectPos::default(), 0);
-//         obj_table.insert(3, obj3, 0);
+        let e4 = Arc::new(Object::E(Entry::new(vec![4], vec![4])));
+        let obj4 = ObjectRef::new(&e4, ObjectPos::default(), 0);
+        let _ = table.insert(4, obj4, 0);
 
-//         let e4 = Arc::new(Object::E(Entry::new(vec![4], vec![4], 4)));
-//         let obj4 = ObjectRef::new(&e4, ObjectPos::default(), 0);
-//         obj_table.insert(4, obj4, 0);
+        let mut l1 = Leaf::default();
+        l1.insert_non_full(0, vec![1], 1);
+        l1.insert_non_full(1, vec![2], 2);
+        let l1 = Arc::new(Object::L(l1));
+        let obj5 = ObjectRef::new(&l1, ObjectPos::default(), 0);
+        let _ = table.insert(5, obj5, 0);
 
-//         let mut l1 = Leaf::default();
-//         l1.info.oid = 5;
-//         l1.insert_non_full(0, vec![1], 1);
-//         l1.insert_non_full(1, vec![2], 2);
-//         let l1 = Arc::new(Object::L(l1));
-//         let obj5 = ObjectRef::new(&l1, ObjectPos::default(), 0);
-//         obj_table.insert(5, obj5, 0);
+        let mut l2 = Leaf::default();
+        l2.insert_non_full(0, vec![3], 3);
+        l2.insert_non_full(1, vec![4], 4);
+        let l2 = Arc::new(Object::L(l2));
+        let obj6 = ObjectRef::new(&l2, ObjectPos::default(), 0);
+        let _ = table.insert(6, obj6, 0);
 
-//         let mut l2 = Leaf::default();
-//         l2.info.oid = 6;
-//         l2.insert_non_full(0, vec![3], 3);
-//         l2.insert_non_full(1, vec![4], 4);
-//         let l2 = Arc::new(Object::L(l2));
-//         let obj6 = ObjectRef::new(&l2, ObjectPos::default(), 0);
-//         obj_table.insert(6, obj6, 0);
+        let mut b1 = Branch::default();
+        b1.keys.push(vec![3]);
+        b1.children.push(5);
+        b1.children.push(6);
+        let b1 = Arc::new(Object::B(b1));
+        let obj7 = ObjectRef::new(&b1, ObjectPos::default(), 0);
+        let _ = table.insert(7, obj7, 0);
 
-//         let mut b1 = Branch::default();
-//         b1.info.oid = 7;
-//         b1.keys.push(vec![3]);
-//         b1.children.push(5);
-//         b1.children.push(6);
-//         let b1 = Arc::new(Object::B(b1));
-//         let obj7 = ObjectRef::new(&b1, ObjectPos::default(), 0);
-//         obj_table.insert(7, obj7, 0);
+        let mut reader = ImMutContext::new(7, 1, Arc::new(table), data_reader, cache);
 
-//         let tree_reader = TreeReader {
-//             table: table,
-//             root_oid: 7,
-//         };
+        assert_eq!(reader.get(&vec![1]).unwrap(), Some(vec![1]));
+        assert_eq!(reader.get(&vec![2]).unwrap(), Some(vec![2]));
+        assert_eq!(reader.get(&vec![3]).unwrap(), Some(vec![3]));
+        assert_eq!(reader.get(&vec![4]).unwrap(), Some(vec![4]));
+        let low = vec![1];
+        let high = vec![4];
+        let mut range = reader.range(&low..&high).unwrap().unwrap();
+        assert_eq!(range.next(), Some(Ok(vec![1])));
+        assert_eq!(range.next(), Some(Ok(vec![2])));
+        assert_eq!(range.next(), Some(Ok(vec![3])));
+        assert_eq!(range.next(), Some(Ok(vec![4])));
+        assert_eq!(range.next(), None);
+        let low = vec![4];
+        let high = vec![5];
+        let mut range = reader.range(&low..&high).unwrap().unwrap();
+        assert_eq!(range.next(), Some(Ok(vec![4])));
+        assert_eq!(range.next(), None);
 
-//         assert_eq!(tree_reader.get(&vec![1]).unwrap(), e1);
-//         assert_eq!(tree_reader.get(&vec![2]).unwrap(), e2);
-//         assert_eq!(tree_reader.get(&vec![3]).unwrap(), e3);
-//         assert_eq!(tree_reader.get(&vec![4]).unwrap(), e4);
-//         let low = vec![1];
-//         let high = vec![4];
-//         let mut range = tree_reader.range(&low..&high).unwrap();
-
-//         assert_eq!(range.next(), Some(e1));
-//         assert_eq!(range.next(), Some(e2));
-//         assert_eq!(range.next(), Some(e3));
-//         assert_eq!(range.next(), None);
-//         let low = vec![4];
-//         let high = vec![5];
-//         range = tree_reader.range(&low..&high).unwrap();
-//         assert_eq!(range.next(), Some(e4.clone()));
-//         assert_eq!(range.next(), None);
-//         cache.close();
-//     }
-// }
+        assert_eq!(reader.get_max(), Ok(Some((vec![4], vec![4]))));
+        assert_eq!(reader.get_min(), Ok(Some((vec![1], vec![1]))));
+    }
+}

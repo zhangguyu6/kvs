@@ -1,6 +1,7 @@
 use crate::object::Object;
 use std::sync::Arc;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectState {
     Readonly(Arc<Object>),
     Dirty(Object, Arc<Object>),

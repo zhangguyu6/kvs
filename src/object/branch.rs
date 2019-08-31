@@ -291,170 +291,188 @@ impl AsObject for Branch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // #[test]
-    // fn test_branch_serialize_deserialize() {
-    //     // test empty
-    //     let branch0 = Branch::default();
-    //     let mut buf: Vec<u8> = vec![0; 4096];
-    //     assert!(branch0.serialize(&mut buf.as_mut_slice()).is_ok());
-    //     let branch00 = Branch::deserialize(&mut buf.as_slice()).unwrap();
-    //     // assert_eq!(branch0, branch00);
-    //     // test one
-    //     let mut branch1 = Branch::default();
-    //     branch1.info.oid = 1;
-    //     branch1.keys.push(vec![1, 2, 3]);
-    //     branch1.children.push(2);
-    //     branch1.children.push(3);
-    //     branch1.info.size += 3 + 1 + 4 + 4;
-    //     assert!(branch1.serialize(&mut buf.as_mut_slice()).is_ok());
-    //     let branch11 = Branch::deserialize(&mut buf.as_slice()).unwrap();
-    //     assert_eq!(branch1, branch11);
-    // }
+    #[test]
+    fn test_branch_serialize_deserialize() {
+        // test empty
+        let branch0 = Branch::default();
+        let mut buf: Vec<u8> = vec![0; 4096];
+        assert!(branch0.serialize(&mut buf.as_mut_slice()).is_ok());
+        let branch00 = Branch::deserialize(&mut buf.as_slice()).unwrap();
+        assert_eq!(branch0, branch00);
+        // test one
+        let mut branch1 = Branch::default();
+        branch1.keys.push(vec![1, 2, 3]);
+        branch1.children.push(2);
+        branch1.children.push(3);
+        branch1.pos.add_len(3 + 1 + 4 + 4);
+        assert!(branch1.serialize(&mut buf.as_mut_slice()).is_ok());
+        let branch11 = Branch::deserialize(&mut buf.as_slice()).unwrap();
+        assert_eq!(branch1, branch11);
+    }
 
-    // #[test]
-    // fn test_branch_search() {
-    //     let mut branch = Branch::default();
-    //     for i in 1..10 {
-    //         branch.keys.push(vec![i]);
-    //         branch.children.push(i as u32);
-    //     }
-    //     branch.children.insert(0, 0);
-    //     assert_eq!(branch.search(&vec![0]), (0, 0));
-    //     assert_eq!(branch.search(&vec![1, 2]), (1, 1));
-    //     assert_eq!(branch.search(&vec![10]), (9, 9));
-    // }
-    // #[test]
-    // fn test_branch_insert() {
-    //     let mut branch = Branch::default();
-    //     for i in 1..3 {
-    //         let key = vec![i];
-    //         branch.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch.keys.push(key);
-    //         branch.children.push(i as u32);
-    //     }
-    //     branch.info.size += mem::size_of::<ObjectId>();
-    //     branch.children.insert(0, 0);
-    //     assert_eq!(branch.len(), Branch::get_header_size() + 2 + 2 + 4 * 3);
-    //     branch.insert_non_full(2, vec![4], 4);
-    //     assert_eq!(
-    //         branch.len(),
-    //         Branch::get_header_size() + 2 + 2 + 4 * 3 + 1 + 1 + 4
-    //     );
-    //     assert_eq!(branch.search(&vec![4]), (4, 3));
-    // }
+    #[test]
+    fn test_branch_search() {
+        let mut branch = Branch::default();
+        for i in 1..10 {
+            branch.keys.push(vec![i]);
+            branch.children.push(i as u32);
+        }
+        branch.children.insert(0, 0);
+        assert_eq!(branch.search(&vec![0]), (0, 0));
+        assert_eq!(branch.search(&vec![1, 2]), (1, 1));
+        assert_eq!(branch.search(&vec![10]), (9, 9));
+    }
+    #[test]
+    fn test_branch_insert() {
+        let mut branch = Branch::default();
+        for i in 1..3 {
+            let key = vec![i];
+            branch.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch.keys.push(key);
+            branch.children.push(i as u32);
+        }
+        branch.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch.children.insert(0, 0);
+        assert_eq!(
+            branch.get_pos().get_len(),
+            Branch::get_header_size() as u16 + 2 + 2 + 4 * 3
+        );
+        branch.insert_non_full(2, vec![4], 4);
+        assert_eq!(
+            branch.get_pos().get_len(),
+            Branch::get_header_size() as u16 + 2 + 2 + 4 * 3 + 1 + 1 + 4
+        );
+        assert_eq!(branch.search(&vec![4]), (4, 3));
+    }
 
-    // #[test]
-    // fn test_branch_split() {
-    //     let mut branch = Branch::default();
-    //     for i in 1..3 {
-    //         let key = vec![i; 40];
-    //         branch.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch.keys.push(key);
-    //         branch.children.push(i as u32);
-    //     }
-    //     branch.info.size += mem::size_of::<ObjectId>();
-    //     branch.children.insert(0, 0);
-    //     for i in 2..100 {
-    //         branch.insert_non_full(i, vec![i as u8 + 1; 40], i as u32 + 1);
-    //     }
-    //     assert_eq!(
-    //         branch.len(),
-    //         Branch::get_header_size() + 40 * 100 + 1 * 100 + 4 * 101
-    //     );
-    //     let branch0 = branch.clone();
-    //     let (key, mut other) = branch.split();
-    //     assert_eq!(key, vec![46; 40]);
-    //     assert_eq!(branch.children.last().unwrap(), &45);
-    //     assert_eq!(other.keys[0], vec![47; 40]);
-    //     assert_eq!(other.children[0], 46);
-    //     branch.merge(&mut other, vec![46; 40]);
-    //     assert_eq!(branch0, branch);
-    // }
+    #[test]
+    fn test_branch_split() {
+        let mut branch = Branch::default();
+        for i in 1..3 {
+            let key = vec![i; 40];
+            branch.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch.keys.push(key);
+            branch.children.push(i as u32);
+        }
+        branch.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch.children.insert(0, 0);
+        for i in 2..100 {
+            branch.insert_non_full(i, vec![i as u8 + 1; 40], i as u32 + 1);
+        }
+        assert_eq!(
+            branch.get_pos().get_len(),
+            Branch::get_header_size() as u16 + 40 * 100 + 1 * 100 + 4 * 101
+        );
+        let branch0 = branch.clone();
+        let (key, mut other) = branch.split();
+        assert_eq!(key, vec![46; 40]);
+        assert_eq!(branch.children.last().unwrap(), &45);
+        assert_eq!(other.keys[0], vec![47; 40]);
+        assert_eq!(other.children[0], 46);
+        branch.merge(&mut other, vec![46; 40]);
+        assert_eq!(branch0, branch);
+    }
 
-    // #[test]
-    // fn test_branch_merge() {
-    //     let mut branch0 = Branch::default();
-    //     for i in 1..3 {
-    //         let key = vec![i; 40];
-    //         branch0.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch0.keys.push(key);
-    //         branch0.children.push(i as u32);
-    //     }
-    //     branch0.info.size += mem::size_of::<ObjectId>();
-    //     branch0.children.insert(0, 0);
-    //     let mut branch1 = Branch::default();
-    //     for i in 4..6 {
-    //         let key = vec![i; 40];
-    //         branch1.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch1.keys.push(key);
-    //         branch1.children.push(i as u32);
-    //     }
-    //     branch1.info.size += mem::size_of::<ObjectId>();
-    //     branch1.children.insert(0, 3);
-    //     let mut branch3 = Branch::default();
-    //     for i in 1..6 {
-    //         let key = vec![i; 40];
-    //         branch3.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch3.keys.push(key);
-    //         branch3.children.push(i as u32);
-    //     }
-    //     branch3.info.size += mem::size_of::<ObjectId>();
-    //     branch3.children.insert(0, 0);
-    //     branch0.merge(&mut branch1, vec![3; 40]);
-    //     assert_eq!(branch0, branch3);
-    // }
+    #[test]
+    fn test_branch_merge() {
+        let mut branch0 = Branch::default();
+        for i in 1..3 {
+            let key = vec![i; 40];
+            branch0.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch0.keys.push(key);
+            branch0.children.push(i as u32);
+        }
+        branch0.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch0.children.insert(0, 0);
+        let mut branch1 = Branch::default();
+        for i in 4..6 {
+            let key = vec![i; 40];
+            branch1.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch1.keys.push(key);
+            branch1.children.push(i as u32);
+        }
+        branch1.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch1.children.insert(0, 3);
+        let mut branch3 = Branch::default();
+        for i in 1..6 {
+            let key = vec![i; 40];
+            branch3.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch3.keys.push(key);
+            branch3.children.push(i as u32);
+        }
+        branch3.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch3.children.insert(0, 0);
+        branch0.merge(&mut branch1, vec![3; 40]);
+        assert_eq!(branch0, branch3);
+    }
 
-    // #[test]
-    // fn test_branch_rebalance() {
-    //     let mut branch0 = Branch::default();
-    //     for i in 1..3 {
-    //         let key = vec![i; 40];
-    //         branch0.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch0.keys.push(key);
-    //         branch0.children.push(i as u32);
-    //     }
-    //     branch0.info.size += mem::size_of::<ObjectId>();
-    //     branch0.children.insert(0, 0);
-    //     for i in 2..9 {
-    //         branch0.insert_non_full(i, vec![i as u8 + 1; 40], i as u32 + 1);
-    //     }
-    //     let mut branch1 = Branch::default();
-    //     for i in 11..13 {
-    //         let key = vec![i; 40];
-    //         branch1.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch1.keys.push(key);
-    //         branch1.children.push(i as u32);
-    //     }
-    //     branch1.info.size += mem::size_of::<ObjectId>();
-    //     branch1.children.insert(0, 10);
-    //     for i in 2..90 {
-    //         branch1.insert_non_full(i, vec![i as u8 + 11; 40], i as u32 + 11);
-    //     }
-    //     assert!(Branch::should_rebalance(&branch0, &branch1));
-    //     let key = branch0.rebalance(&mut branch1, vec![10; 40]);
-    //     assert_eq!(key, vec![46; 40]);
-    //     let mut new_branch0 = branch0.clone();
-    //     let mut new_branch1 = branch1.clone();
-    //     new_branch0.merge(&mut new_branch1, vec![46; 40]);
-    //     let (key, new_branch1) = new_branch0.split();
-    //     assert_eq!(key, vec![46; 40]);
-    //     assert_eq!(branch0, new_branch0);
-    //     assert_eq!(branch1, new_branch1);
-    //     let mut branch = Branch::default();
-    //     for i in 1..3 {
-    //         let key = vec![i; 40];
-    //         branch.info.size += key.len() + mem::size_of::<u8>() + mem::size_of::<ObjectId>();
-    //         branch.keys.push(key);
-    //         branch.children.push(i as u32);
-    //     }
-    //     branch.info.size += mem::size_of::<ObjectId>();
-    //     branch.children.insert(0, 0);
-    //     for i in 2..100 {
-    //         branch.insert_non_full(i, vec![i as u8 + 1; 40], i as u32 + 1);
-    //     }
-    //     let (key, mut other) = branch.split();
-    //     assert_eq!(branch, branch0);
-    //     assert_eq!(other, branch1);
-    // }
+    #[test]
+    fn test_branch_rebalance() {
+        let mut branch0 = Branch::default();
+        for i in 1..3 {
+            let key = vec![i; 40];
+            branch0.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch0.keys.push(key);
+            branch0.children.push(i as u32);
+        }
+        branch0.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch0.children.insert(0, 0);
+        for i in 2..9 {
+            branch0.insert_non_full(i, vec![i as u8 + 1; 40], i as u32 + 1);
+        }
+        let mut branch1 = Branch::default();
+        for i in 11..13 {
+            let key = vec![i; 40];
+            branch1.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch1.keys.push(key);
+            branch1.children.push(i as u32);
+        }
+        branch1.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch1.children.insert(0, 10);
+        for i in 2..90 {
+            branch1.insert_non_full(i, vec![i as u8 + 11; 40], i as u32 + 11);
+        }
+        assert!(Branch::should_rebalance(&branch0, &branch1));
+        let key = branch0.rebalance(&mut branch1, vec![10; 40]);
+        assert_eq!(key, vec![46; 40]);
+        let mut new_branch0 = branch0.clone();
+        let mut new_branch1 = branch1.clone();
+        new_branch0.merge(&mut new_branch1, vec![46; 40]);
+        let (key, new_branch1) = new_branch0.split();
+        assert_eq!(key, vec![46; 40]);
+        assert_eq!(branch0, new_branch0);
+        assert_eq!(branch1, new_branch1);
+        let mut branch = Branch::default();
+        for i in 1..3 {
+            let key = vec![i; 40];
+            branch.pos.add_len(
+                key.len() as u16 + mem::size_of::<u8>() as u16 + mem::size_of::<ObjectId>() as u16,
+            );
+            branch.keys.push(key);
+            branch.children.push(i as u32);
+        }
+        branch.pos.add_len(mem::size_of::<ObjectId>() as u16);
+        branch.children.insert(0, 0);
+        for i in 2..100 {
+            branch.insert_non_full(i, vec![i as u8 + 1; 40], i as u32 + 1);
+        }
+        let (key, mut other) = branch.split();
+        assert_eq!(branch, branch0);
+        assert_eq!(other, branch1);
+    }
 
 }

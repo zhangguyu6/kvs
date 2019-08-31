@@ -1,19 +1,22 @@
 use crate::error::TdbError;
-use crate::meta::{PageId,InnerTable};
+use crate::meta::{InnerTable, PageId};
 use crate::object::{ObjectId, UNUSED_OID};
 use crate::storage::{Deserialize, ObjectPos, Serialize};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::mem;
-use std::u32;
 
+const MAGIC_NUM: u32 = 0xfAfAfAfA;
+
+/// Meta data redo log
+/// Write to Meta file every write transcation
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CheckPoint {
     // current checkpoint size,
     pub size: u32,
-    // crc fast
-    pub crc: u32,
+    // magic
+    pub magic: u32,
     // for gc
     pub data_removed_size: u64,
     pub data_size: u64,
@@ -37,8 +40,8 @@ impl CheckPoint {
         let mut cp = Self {
             // current checkpoint size,
             size: 0,
-            // crc fast
-            crc: u32::MAX,
+            // magic
+            magic: MAGIC_NUM,
             // for gc
             data_removed_size,
             data_size,
@@ -71,7 +74,7 @@ impl CheckPoint {
 
     pub fn get_dirty_pages(&self) -> HashSet<PageId> {
         let mut dirty_pages = HashSet::default();
-                for (oid, _) in self.obj_changes.iter() {
+        for (oid, _) in self.obj_changes.iter() {
             dirty_pages.insert(InnerTable::get_page_id(*oid));
         }
         dirty_pages
@@ -81,7 +84,7 @@ impl CheckPoint {
     pub fn len(&self) -> usize {
         // size
         mem::size_of::<u32>()
-        // crc 32
+        // crcmagic 32
         + mem::size_of::<u32>()
         // data_removed_size
             + mem::size_of::<u64>()
@@ -105,8 +108,8 @@ impl Default for CheckPoint {
         let mut cp = Self {
             // current checkpoint size,
             size: 0,
-            // crc fast
-            crc: u32::MAX,
+            // magic
+            magic: MAGIC_NUM,
             // for gc
             data_removed_size: 0,
             data_size: 0,
@@ -127,7 +130,7 @@ impl Default for CheckPoint {
 impl Serialize for CheckPoint {
     fn serialize<W: Write>(&self, writer: &mut W) -> Result<usize, TdbError> {
         writer.write_u32::<LittleEndian>(self.size)?;
-        writer.write_u32::<LittleEndian>(self.crc)?;
+        writer.write_u32::<LittleEndian>(self.magic)?;
         writer.write_u64::<LittleEndian>(self.data_removed_size)?;
         writer.write_u64::<LittleEndian>(self.data_size)?;
         writer.write_u32::<LittleEndian>(self.root_oid)?;
@@ -148,8 +151,8 @@ impl Deserialize for CheckPoint {
         if size == 0 {
             return Err(TdbError::SerializeError);
         }
-        let crc = reader.read_u32::<LittleEndian>()?;
-        if crc != u32::MAX {
+        let magic = reader.read_u32::<LittleEndian>()?;
+        if magic != MAGIC_NUM {
             return Err(TdbError::SerializeError);
         }
         let data_removed_size = reader.read_u64::<LittleEndian>()?;
@@ -166,7 +169,7 @@ impl Deserialize for CheckPoint {
         }
         Ok(Self {
             size,
-            crc,
+            magic,
             data_removed_size,
             data_size,
             root_oid,
@@ -180,8 +183,9 @@ impl Deserialize for CheckPoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::object::ObjectTag;
     #[test]
-    fn test_checkpoint_size() {
+    fn test_cp_size() {
         let mut cp = CheckPoint::default();
         assert_eq!(cp.len(), 4 + 4 + 8 + 8 + 4 + 4 + 4 + 4);
         cp.obj_changes.push((1, ObjectPos::default()));
@@ -202,4 +206,31 @@ mod tests {
         let cp1 = CheckPoint::deserialize(&mut &buf[..]).unwrap();
         assert_eq!(cp0, cp1);
     }
+
+    #[test]
+    fn test_cp_merge() {
+        let cp0 = CheckPoint::new(
+            0,
+            4096,
+            1,
+            123,
+            10,
+            vec![(0, ObjectPos::default()), (2, ObjectPos::default())],
+        );
+        let mut cp1 = CheckPoint::new(
+            1,
+            4096,
+            2,
+            234,
+            9,
+            vec![
+                (0, ObjectPos::new(1, 1, ObjectTag::Entry)),
+                (1, ObjectPos::new(1, 1, ObjectTag::Entry)),
+            ],
+        );
+        let cp2 = CheckPoint::merge(vec![cp0.clone(), cp1.clone()]);
+        cp1.obj_changes.push((2, ObjectPos::default()));
+        assert_eq!(cp1, cp2);
+    }
+
 }

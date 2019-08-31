@@ -22,8 +22,26 @@ pub const MAX_PAGE_NUM: usize = u32::MAX as usize / OBJ_PRE_PAGE;
 pub type PageId = u32;
 
 /// Manage OBJ_PRE_PAGE objects, each object may have differernt version and protected by rwlock
+#[derive(Debug)]
 pub struct TablePage {
     children: Vec<RwLock<Versions>>,
+}
+
+impl Eq for TablePage {}
+
+impl PartialEq for TablePage {
+    fn eq(&self, other: &TablePage) -> bool {
+        if self.children.len() != other.children.len() {
+            false
+        } else {
+            for i in 0..self.children.len() {
+                if *self.children[i].read() != *other.children[i].read() {
+                    return false;
+                }
+            }
+            true
+        }
+    }
 }
 
 impl Default for TablePage {
@@ -54,8 +72,12 @@ impl Deserialize for TablePage {
         let mut children = Vec::with_capacity(OBJ_PRE_PAGE);
         for _ in 0..OBJ_PRE_PAGE {
             let pos = ObjectPos(reader.read_u64::<LittleEndian>()?);
-            let versions = Versions::new_only(ObjectRef::on_disk(pos, 0));
-            children.push(RwLock::new(versions));
+            if !pos.is_empty() {
+                let versions = Versions::new_only(ObjectRef::on_disk(pos, 0));
+                children.push(RwLock::new(versions));
+            } else {
+                children.push(RwLock::default());
+            }
         }
         Ok(Self { children })
     }
@@ -78,9 +100,14 @@ impl InnerTable {
         assert!(pnum <= MAX_PAGE_NUM);
         // pre allocated all page
         let mut pages = Vec::with_capacity(MAX_PAGE_NUM);
+        // allocate and init
         for _ in 0..pnum {
             let page_ptr = Box::into_raw(Box::new(TablePage::default()));
             pages.push(AtomicPtr::new(page_ptr));
+        }
+        // allocate and not init
+        for _ in pnum..MAX_PAGE_NUM {
+            pages.push(AtomicPtr::default());
         }
         Self {
             pages,

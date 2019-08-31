@@ -5,7 +5,6 @@ use crossbeam::{
     utils::Backoff,
 };
 use lru_cache::LruCache;
-
 use std::sync::Arc;
 use std::thread;
 
@@ -16,6 +15,8 @@ enum ObjectOp {
     Close,
 }
 
+/// Hander for send Arc<Object> to background cache thread
+/// InnerTable has Weak<Object>,so background just need to own Arc<Object>
 pub struct ImMutCache {
     sender: Sender<ObjectOp>,
 }
@@ -31,6 +32,21 @@ impl Clone for ImMutCache {
         Self {
             sender: self.sender.clone(),
         }
+    }
+}
+
+impl ImMutCache {
+    /// Send Arc<Object> to cache
+    pub fn insert(&self, obj_pos: ObjectPos, arc_obj: Arc<Object>) {
+        if !arc_obj.is::<Entry>() {
+            self.sender
+                .try_send(ObjectOp::Insert(obj_pos, arc_obj))
+                .expect("send error");
+        }
+    }
+    /// Close background cache thread
+    pub fn close(&self) {
+        self.sender.try_send(ObjectOp::Close).expect("send error");
     }
 }
 
@@ -52,6 +68,7 @@ impl ImMutCacheInner {
         handler
     }
 
+    /// Background thread loop on received Arc<Object>
     fn work(mut self) {
         thread::spawn(move || loop {
             let backoff = Backoff::new();
@@ -77,18 +94,5 @@ impl ImMutCacheInner {
                 },
             }
         });
-    }
-}
-
-impl ImMutCache {
-    pub fn insert(&self, obj_pos: ObjectPos, arc_obj: Arc<Object>) {
-        if !arc_obj.is::<Entry>() {
-            self.sender
-                .try_send(ObjectOp::Insert(obj_pos, arc_obj))
-                .expect("send error");
-        }
-    }
-    pub fn close(&self) {
-        self.sender.try_send(ObjectOp::Close).expect("send error");
     }
 }

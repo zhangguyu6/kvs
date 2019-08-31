@@ -46,15 +46,12 @@ impl MutContext {
         Ok((mut_ctx, table, cache))
     }
     // Find at least one checkpoint
-    pub fn new(
-        dev: Dev,
-        cp: CheckPoint,
-    ) -> Result<(Self, Arc<InnerTable>, ImMutCache), TdbError> {
+    pub fn new(dev: Dev, cp: CheckPoint) -> Result<(Self, Arc<InnerTable>, ImMutCache), TdbError> {
         let data_log_reader = dev.get_data_reader()?;
         let meta_writer = dev.get_meta_writer(cp.meta_size as usize)?;
         let table_writer = dev.get_table_writer(cp.tablepage_nums)?;
         let data_writer = dev.get_data_writer(cp.data_size, cp.data_removed_size)?;
-        let (table,bitmap) = dev.get_table_reader()?.read_table(&cp)?;
+        let (table, bitmap) = dev.get_table_reader()?.read_table(&cp)?;
         let dirty_pages = cp.get_dirty_pages();
         let mut_ctx = Self {
             root_oid: cp.root_oid,
@@ -84,10 +81,8 @@ impl MutContext {
             return Err(TdbError::ObjectTooBig);
         }
         if let Some(oid) = self.get_oid(&key)? {
-            debug!("get oid {:?}", oid);
             // make oid dirty
             let obj_mut = self.table.get_mut(oid, self.ts)?;
-            debug!("obj_mut is {:?}", obj_mut);
             assert!(obj_mut.is::<Entry>());
             let entry_mut = obj_mut.get_mut::<Entry>();
             assert!(entry_mut.key == key);
@@ -476,7 +471,6 @@ impl MutContext {
     }
 
     fn get_oid<K: Borrow<[u8]>>(&mut self, key: &K) -> Result<Option<ObjectId>, TdbError> {
-        debug!("root oid is {:?}", self.root_oid);
         // tree is empty
         if self.root_oid == UNUSED_OID {
             return Ok(None);
@@ -484,7 +478,6 @@ impl MutContext {
         let mut current_oid = self.root_oid;
         loop {
             let current_obj = self.table.get_ref(current_oid, self.ts)?;
-            debug!("obj is {:?}", current_obj);
             match current_obj {
                 Object::E(_) => unreachable!(),
                 Object::L(leaf) => match leaf.search(key) {
@@ -528,14 +521,16 @@ impl MutContext {
     }
 
     pub fn commit(&mut self) -> Result<Arc<Context>, TdbError> {
-        debug!("mut context commit start");
         let min_ts = self.gc();
+        debug!("gc complete, min_ts = {:?}", min_ts);
         // write objs to data file
         let (data_size, data_removed_size) =
-            self.data_writer.write_objs(self.table.obj_iter_mut())?;
+            self.data_writer.write_objs(self.table.get_mut_cache())?;
+        self.data_writer.flush()?;
+        debug!("data writer complete");
         // apply obj change to table
         let (cur_gc_ctx, obj_changes) = self.table.apply(self.ts, min_ts);
-        debug!("make new checkpoint start");
+        debug!("table apply complete, obj_changes is {:?}", obj_changes);
         // make new checkpoint
         let mut cp = CheckPoint::new(
             data_removed_size,
@@ -545,7 +540,7 @@ impl MutContext {
             self.table_writer.used_page_num as u32,
             obj_changes,
         );
-        debug!("checkpoint at {:?}", &cp);
+        debug!("generate checkpoint {:?}", cp);
         // write checkpoint
         if self.meta_writer.write_cp(&mut cp)? {
             // apply checkpoint if meta file is overflow
@@ -558,162 +553,125 @@ impl MutContext {
                 }
             }
             self.table_writer.flush()?;
+            debug!("table writer complete");
             cp.obj_changes.clear();
             cp.tablepage_nums = self.table_writer.used_page_num;
             // write new appiled checkpoint to temp and rename
             self.meta_writer
                 .write_cp_rename(cp, &self.dev.meta_log_file_path)?;
         }
+        debug!("meta writer complete");
         // push current ctx to gc ctx
         let ctx = Arc::new(Context {
             ts: self.ts,
             root_oid: self.root_oid,
         });
+        debug!("generate new ctx {:?}", ctx);
         self.gc_ctx
             .push_back((Arc::downgrade(&ctx), ctx.ts, cur_gc_ctx));
         Ok(ctx)
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::cache::ObjectStateCache;
-//     use crate::object::*;
-//     use crate::storage::Dummy;
-//     use crate::tree::Entry;
-//     #[test]
-//     fn test_object_modify() {
-//         let dummy = Dummy {};
-//         let dev = BlockDev::new(dummy);
-//         let table = ObjectTable::with_capacity(1 << 16);
-//         let mut bitmap = ObjectAllocater::with_capacity(1 << 16);
-//         let mut cache = ObjectStateCache::with_capacity(512);
-//         let mut obj_mod = ObjectModify {
-//             ts: 0,
-//             dev: &dev,
-//             table: &table,
-//             bitmap: &mut bitmap,
-//             dirty_cache: &mut cache,
-//         };
-//         assert_eq!(obj_mod.insert(Object::E(Entry::default())), 0);
-//         assert!(obj_mod.get_ref(0).is_some());
-//         obj_mod.get_mut(0).unwrap().get_mut::<Entry>().key = vec![1];
-//         assert_eq!(obj_mod.get_ref(0).unwrap().get_ref::<Entry>().key, vec![1]);
-//         assert!(obj_mod.dirty_cache.get_mut(0).unwrap().is_new());
-//         assert!(obj_mod.remove(0).is_some());
-//         assert!(obj_mod.dirty_cache.insert(1, ObjectState::Del).is_none());
-//         assert!(obj_mod.get_ref(0).is_none());
-//         assert!(obj_mod.get_ref(1).is_none());
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::Dev;
+    use std::env;
+    #[test]
+    fn test_mut_ctx() {
+        let dev = Dev::open(env::current_dir().unwrap()).unwrap();
+        let (mut mut_ctx, _, _) = MutContext::new_empty(dev).unwrap();
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::cache::ObjectStateCache;
-//     use crate::meta::ObjectTable;
-//     use crate::object::*;
-//     use crate::storage::{BlockDev, Dummy};
-//     #[test]
-//     fn test_tree_writer() {
-//         let dummy = Dummy {};
-//         let dev = BlockDev::new(dummy);
-//         let table = ObjectTable::with_capacity(1 << 16);
-//         let mut bitmap = ObjectAllocater::with_capacity(1 << 16);
-//         let mut cache = ObjectStateCache::with_capacity(512);
-//         let mut obj_mod = ObjectModify {
-//             ts: 0,
-//             dev: &dev,
-//             table: &table,
-//             bitmap: &mut bitmap,
-//             dirty_cache: &mut cache,
-//         };
-//         let mut tree_writer = TreeWriter {
-//             table: obj_mod,
-//             root_oid: UNUSED_OID,
-//         };
-//         tree_writer.insert(vec![0; 255], vec![1]);
-//         assert_eq!(tree_writer.get(&vec![0; 255]).unwrap().val, vec![1]);
-//         assert_eq!(tree_writer.remove(&vec![0; 255]), Some((vec![0; 255], 1)));
-//         assert_eq!(tree_writer.get(&vec![0; 255]), None);
+        let _ = mut_ctx.insert(vec![0; 255], vec![1]);
+        assert_eq!(
+            mut_ctx.get_entry(&vec![0; 255]).unwrap().unwrap().val,
+            vec![1]
+        );
+        assert_eq!(
+            mut_ctx.remove(&vec![0; 255]).unwrap(),
+            Some((vec![0; 255], vec![1]))
+        );
+        assert_eq!(mut_ctx.get_entry(&vec![0; 255]).unwrap(), None);
 
-//         for i in 0..255 {
-//             tree_writer.insert(vec![i; 255], vec![i]);
-//         }
-//         for i in 0..255 {
-//             assert_eq!(tree_writer.get(&vec![i; 255]).unwrap().val, vec![i]);
-//         }
+        for i in 0..255 {
+            let _ = mut_ctx.insert(vec![i; 255], vec![i]);
+        }
+        for i in 0..255 {
+            assert_eq!(
+                mut_ctx.get_entry(&vec![i; 255]).unwrap().unwrap().val,
+                vec![i]
+            );
+        }
 
-//         for i in 0..255 {
-//             tree_writer.remove(&vec![i; 255]);
-//         }
+        for i in 0..255 {
+            let _ = mut_ctx.remove(&vec![i; 255]);
+        }
 
-//         for i in 0..255 {
-//             assert_eq!(tree_writer.get(&vec![i; 255]), None);
-//         }
+        for i in 0..255 {
+            assert_eq!(mut_ctx.get_entry(&vec![i; 255]).unwrap(), None);
+        }
 
-//         for i in 0..255 {
-//             tree_writer.insert(vec![i; 255], vec![i]);
-//         }
+        for i in 0..255 {
+            let _ = mut_ctx.insert(vec![i; 255], vec![i]);
+        }
 
-//         for i in (0..255).rev() {
-//             tree_writer.remove(&vec![i; 255]);
-//         }
+        for i in (0..255).rev() {
+            let _ = mut_ctx.remove(&vec![i; 255]);
+        }
 
-//         for i in 0..255 {
-//             assert_eq!(tree_writer.get(&vec![i; 255]), None);
-//         }
+        for i in 0..255 {
+            assert_eq!(mut_ctx.get_entry(&vec![i; 255]).unwrap(), None);
+        }
 
-//         for i in 0..255 {
-//             for j in 0..255 {
-//                 let mut key = vec![j; 255];
-//                 key[0] = i;
-//                 let val = vec![i, j];
-//                 tree_writer.insert(key, val);
-//             }
-//         }
+        for i in 0..255 {
+            for j in 0..255 {
+                let mut key = vec![j; 255];
+                key[0] = i;
+                let val = vec![i, j];
+                let _ = mut_ctx.insert(key, val);
+            }
+        }
 
-//         for i in 0..255 {
-//             for j in 0..255 {
-//                 let mut key = vec![j; 255];
-//                 key[0] = i;
-//                 tree_writer.remove(&key);
-//             }
-//         }
+        for i in 0..255 {
+            for j in 0..255 {
+                let mut key = vec![j; 255];
+                key[0] = i;
+                let _ = mut_ctx.remove(&key);
+            }
+        }
 
-//         for i in 0..255 {
-//             for j in 0..255 {
-//                 let mut key = vec![j; 255];
-//                 key[0] = i;
-//                 assert_eq!(tree_writer.get(&key), None);
-//             }
-//         }
+        for i in 0..255 {
+            for j in 0..255 {
+                let mut key = vec![j; 255];
+                key[0] = i;
+                assert_eq!(mut_ctx.get_entry(&key).unwrap(), None);
+            }
+        }
 
-//         for i in 0..255 {
-//             for j in 0..255 {
-//                 let mut key = vec![j; 255];
-//                 key[0] = i;
-//                 let val = vec![i, j];
-//                 tree_writer.insert(key, val);
-//             }
-//         }
+        for i in 0..255 {
+            for j in 0..255 {
+                let mut key = vec![j; 255];
+                key[0] = i;
+                let val = vec![i, j];
+                let _ = mut_ctx.insert(key, val);
+            }
+        }
 
-//         for i in 0..255 {
-//             for j in 0..255 {
-//                 let mut key = vec![j; 255];
-//                 key[0] = i;
-//                 tree_writer.remove(&key);
-//             }
-//         }
+        for i in 0..255 {
+            for j in 0..255 {
+                let mut key = vec![j; 255];
+                key[0] = i;
+                let _ = mut_ctx.remove(&key);
+            }
+        }
 
-//         for i in (0..255).rev() {
-//             for j in (0..255).rev() {
-//                 let mut key = vec![j; 255];
-//                 key[0] = i;
-//                 assert_eq!(tree_writer.get(&key), None);
-//             }
-//         }
-//         println!("{:?}", tree_writer.root_oid);
-//     }
-// }
+        for i in (0..255).rev() {
+            for j in (0..255).rev() {
+                let mut key = vec![j; 255];
+                key[0] = i;
+                assert_eq!(mut_ctx.get_entry(&key).unwrap(), None);
+            }
+        }
+    }
+}

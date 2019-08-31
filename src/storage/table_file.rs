@@ -51,9 +51,8 @@ impl TableFileReader {
         TableFileReader { reader: file }
     }
     pub fn read_table(&mut self, cp: &CheckPoint) -> Result<(InnerTable, BitMap), TdbError> {
-        debug!("start read table, checkpoint is {:?}", cp);
         self.reader.seek(SeekFrom::Start(0))?;
-        let table = InnerTable::with_capacity(cp.tablepage_nums as usize);
+        let table = InnerTable::with_capacity(0);
         let mut bitmap = BitMap::with_capacity(cp.tablepage_nums as usize * OBJ_PRE_PAGE);
         let mut buf: [u8; TABLE_PAGE_SIZE] = [0; TABLE_PAGE_SIZE];
         for pid in 0..cp.tablepage_nums {
@@ -88,4 +87,45 @@ impl TableFileReader {
         }
         Ok((table, bitmap))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::object::{ObjectRef, ObjectTag};
+    use crate::storage::{Dev, ObjectPos};
+    use tempfile::tempdir;
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+    #[test]
+    fn test_table_file() {
+        init();
+        let dir = tempdir().unwrap();
+        let dev = Dev::open(dir.path()).unwrap();
+        let mut table_reader = dev.get_table_reader().unwrap();
+        let mut table_writer = dev.get_table_writer(0).unwrap();
+        let table = InnerTable::with_capacity(0);
+        let mut bitmap: BitMap<u32> = BitMap::with_capacity(0);
+        table.extend_to(0);
+        bitmap.extend_to(OBJ_PRE_PAGE);
+        let pos = ObjectPos::new(1, 2, ObjectTag::Entry);
+        assert!(table.insert(1, ObjectRef::on_disk(pos, 0), 0).is_ok());
+        bitmap.set_bit(1, true);
+        let page_ref = table.get_page_ref(0);
+        assert!(table_writer.write_page(0, page_ref).is_ok());
+        assert!(table_writer.flush().is_ok());
+        let mut cp = CheckPoint::default();
+        let pos = ObjectPos::new(2, 3, ObjectTag::Entry);
+        assert!(table.insert(2, ObjectRef::on_disk(pos, 0), 0).is_ok());
+        bitmap.set_bit(2, true);
+        cp.obj_changes.push((2, pos));
+        cp.tablepage_nums = 1;
+        let (table0, bitmap0) = table_reader.read_table(&cp).unwrap();
+        assert_eq!(table0.get_page_ref(0), page_ref);
+        for i in 0..OBJ_PRE_PAGE {
+            assert_eq!(bitmap0.get_bit(i), bitmap.get_bit(i));
+        }
+    }
+
 }

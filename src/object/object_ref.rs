@@ -13,6 +13,16 @@ pub struct ObjectRef {
     pub end_ts: TimeStamp,
 }
 
+impl Eq for ObjectRef {}
+
+impl PartialEq for ObjectRef {
+    fn eq(&self, other: &ObjectRef) -> bool {
+        self.obj_pos == other.obj_pos
+            && self.start_ts == other.start_ts
+            && self.end_ts == other.end_ts
+    }
+}
+
 impl ObjectRef {
     pub fn new(arc_obj: &Arc<Object>, pos: ObjectPos, ts: TimeStamp) -> Self {
         Self {
@@ -32,7 +42,7 @@ impl ObjectRef {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Versions {
     pub history: VecDeque<ObjectRef>,
 }

@@ -6,8 +6,7 @@ use crate::storage::{DataFileReader, ObjectPos};
 use crate::transaction::TimeStamp;
 use crate::utils::BitMap;
 use log::debug;
-use std::collections::hash_map::IterMut;
-use std::collections::HashSet;
+use std::collections::{HashSet,HashMap};
 use std::sync::Arc;
 
 pub struct MutTable {
@@ -224,8 +223,10 @@ impl MutTable {
             self.dirty_pages.insert(InnerTable::get_page_id(oid));
             match obj {
                 ObjectState::Dirty(obj, _) | ObjectState::New(obj) => {
-                    let version = ObjectRef::on_disk(obj.get_pos().clone(), ts);
-                    obj_changes.push((oid, obj.get_pos().clone()));
+                    let arc_obj = Arc::new(obj);
+                    let version = ObjectRef::new(&arc_obj, arc_obj.get_pos().clone(), ts);
+                    obj_changes.push((oid, arc_obj.get_pos().clone()));
+                    self.cache.insert(arc_obj.get_pos().clone(), arc_obj);
                     match self.table.insert(oid, version, min_ts) {
                         Ok(()) => {}
                         Err(oid) => gc_ctx.push(oid),
@@ -245,7 +246,7 @@ impl MutTable {
     }
 
     /// Free object if no immut context will see it  
-    pub fn gc(&mut self, oids: HashSet<ObjectId>, min_ts: TimeStamp){
+    pub fn gc(&mut self, oids: HashSet<ObjectId>, min_ts: TimeStamp) {
         for oid in oids.iter() {
             self.table.try_gc(*oid, min_ts);
         }
@@ -253,8 +254,8 @@ impl MutTable {
 
     /// Return all changed obj in mut iter, DataFileWriter should used this iter and change obj's pos
     #[inline]
-    pub fn obj_iter_mut(&mut self) -> IterMut<ObjectId, ObjectState> {
-        self.dirty_cache.iter_mut()
+    pub fn get_mut_cache(&mut self) -> &mut HashMap<ObjectId, ObjectState> {
+        self.dirty_cache.get_inner_mut()
     }
 
     #[inline]
@@ -274,4 +275,46 @@ impl MutTable {
     pub fn get_page(&self, pid: PageId) -> &TablePage {
         self.table.get_page_ref(pid)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::meta::ImMutTable;
+    use crate::object::{Leaf, ObjectRef};
+    use crate::storage::{Dev, ObjectPos};
+    use crate::utils::BitMap;
+    use std::env;
+    #[test]
+    fn test_mut_table() {
+        let dev = Dev::open(env::current_dir().unwrap()).unwrap();
+        let data_reader = dev.get_data_reader().unwrap();
+        let table = InnerTable::with_capacity(0);
+        let bitamp: BitMap<u32> = BitMap::with_capacity(0);
+        let mut mut_table = MutTable::new(data_reader, table, bitamp, HashSet::default());
+        let mut immut_table = ImMutTable::new(
+            mut_table.table.clone(),
+            dev.get_data_reader().unwrap(),
+            mut_table.cache.clone(),
+        );
+
+        let obj0 = Object::L(Leaf::default());
+        let oid0 = mut_table.insert(obj0.clone());
+        assert_eq!(mut_table.get_ref(oid0, 0), Ok(&obj0));
+        assert_eq!(immut_table.get_obj(oid0, 0), Err(TdbError::NotFindObject));
+        let (oids, oidpos) = mut_table.apply(2, 1);
+        assert_eq!(oids, vec![]);
+        assert_eq!(oidpos, vec![(0, obj0.get_pos().clone())]);
+        assert_eq!(immut_table.get_obj(oid0, 1), Err(TdbError::NotFindObject));
+        assert_eq!(immut_table.get_obj(oid0, 2), Ok(Arc::new(obj0.clone())));
+        assert_eq!(
+            mut_table.remove(oid0, 3),
+            Ok(ObjectState::Readonly(Arc::new(obj0.clone())))
+        );
+        mut_table.apply(3, 1);
+        assert_eq!(immut_table.get_obj(oid0, 1), Err(TdbError::NotFindObject));
+        assert_eq!(immut_table.get_obj(oid0, 2), Ok(Arc::new(obj0.clone())));
+        assert_eq!(immut_table.get_obj(oid0, 3), Err(TdbError::NotFindObject));
+    }
+
 }
