@@ -188,6 +188,11 @@ mod tests {
         let mut reader1 = kv.get_reader().unwrap();
         assert_eq!(reader.get(&vec![255, 2, 2]), Ok(Some(vec![255, 2, 2])));
         assert_eq!(reader1.get(&vec![255, 2, 2]), Ok(None));
+        // close and re-open
+        drop(kv);
+        let kv = KVStore::open(dir.path()).unwrap();
+        let mut reader0 = kv.get_reader().unwrap();
+        assert_eq!(reader0.get(&vec![255, 2, 2]), Ok(None));
     }
 
 }

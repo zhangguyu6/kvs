@@ -1,5 +1,5 @@
 [package]
-name = "tdb"
+name = "kvs"
 version = "0.1.0"
 authors = ["zhangguyu <zhangguyu6@gmail.com>"]
 edition = "2018"
