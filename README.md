@@ -41,8 +41,8 @@ fn main() {
 
 ## TODO
 
-- [*] Mvcc support
-- [*] Error handling
+- [X] Mvcc support
+- [X] Error handling
 - [ ] Garbage collector
 - [ ] Statics
 - [ ] Documentation
